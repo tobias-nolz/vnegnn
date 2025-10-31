@@ -9,7 +9,7 @@ SCRIPTS="$PROJECT_ROOT/scripts"
 for folder in "$DATA_ROOT"/*; do
     if [ -d "$folder" ]; then
         echo "Processing folder: $folder"
-        python3 "$SCRIPTS/protein_features.py" -p "$folder" -j "$(nproc)" -b processes
+        python3 "$SCRIPTS/protein_features.py" -i "$folder" -j "$(nproc)"
         python3 "$SCRIPTS/extract_binding_atoms.py" -p "$folder" -j "$(nproc)" -t 4.0 -b processes
     fi
 done
