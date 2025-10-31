@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE="data"
-DATA_ROOT="$BASE/data"
-SCRIPTS="$BASE/scripts"
+PROJECT_ROOT="$(dirname "$(dirname "$(realpath "$0")")")"
+DATA_ROOT="$PROJECT_ROOT/data/data"
+SCRIPTS="$PROJECT_ROOT/scripts"
 
 # Process all folders in data/equipocket
 for folder in "$DATA_ROOT"/*; do
