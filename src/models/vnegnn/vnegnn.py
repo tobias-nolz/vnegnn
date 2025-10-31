@@ -12,7 +12,7 @@ from torch_geometric.nn import (
 )
 from torch_geometric.typing import Adj, OptPairTensor, OptTensor
 
-from src.models.utils import CoorsNorm
+from .utils import CoorsNorm
 
 
 class EGNNLayer(MessagePassing):
