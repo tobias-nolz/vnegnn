@@ -5,7 +5,7 @@ PROJECT_ROOT="$(dirname "$(dirname "$(realpath "$0")")")"
 DATA_ROOT="$PROJECT_ROOT/data/data"
 SCRIPTS="$PROJECT_ROOT/scripts"
 
-# Process all folders in data/equipocket
+# Process all folders in data/data
 for folder in "$DATA_ROOT"/*; do
     if [ -d "$folder" ]; then
         echo "Processing folder: $folder"

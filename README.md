@@ -89,6 +89,7 @@ Run the following commands, to setup files used for training:
 ./process_data.sh
 ```
 To rerun the Equipocket baseline you need to specify MSMS path, for surface generation.
+The data for Equipocket has to be saved in ``data/equipocket``, then run:
 ```bash
 ./process_data_equipocket.sh
 ```

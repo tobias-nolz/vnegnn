@@ -13,7 +13,7 @@ logger:
 tags: []
 
 data:
-  root: ${paths.data_dir}/equipocket
+  root: ${paths.data_dir}/data
 
 trainer:
   max_epochs: 1500

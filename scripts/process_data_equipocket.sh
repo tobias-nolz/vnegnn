@@ -2,7 +2,7 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(dirname "$(dirname "$(realpath "$0")")")"
-DATA_ROOT="$PROJECT_ROOT/data/data"
+DATA_ROOT="$PROJECT_ROOT/data/equipocket"
 SCRIPTS="$PROJECT_ROOT/scripts"
 
 # Process all folders in data/equipocket

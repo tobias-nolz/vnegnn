@@ -7,6 +7,9 @@ defaults:
 
 train_valid_split: scpdb
 
+data:
+  root: ${paths.data_dir}/equipocket
+
 logger:
   wandb:
     name: equipocket_${train_valid_split}
