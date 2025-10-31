@@ -84,6 +84,27 @@ source .env
 
 # Data
 The datasets are processed and be downloaded from [this](https://zenodo.org/records/17365855) link. Place the datasets in the folder ``data/data``.
+
+```
+📁 data
+├── 📁 data                # Processed datasets
+│   ├── 📁 coach420        # COACH420 dataset
+│   │   ├── 📁 splits        # Dataset splits
+│   │   └── 📁 raw           # Raw data
+│   ├── 📁 holo4k          # Holo4K dataset
+│   │   ├── 📁 splits        # Dataset splits
+│   │   └── 📁 raw           # Raw data
+│   ├── 📁 pdbbind2020     # PDBBind2020 dataset
+│   │   ├── 📁 splits        # Dataset splits
+│   │   └── 📁 raw           # Raw data
+│   └── 📁 sc-pdb          # scPDB dataset
+│       ├── 📁 splits        # Dataset splits
+│       └── 📁 raw           # Raw data
+└── 📁 equipocket          # Equipocket dataset
+    └── ...
+```
+
+
 Run the following commands, to setup files used for training:
 ```bash
 ./process_data.sh
