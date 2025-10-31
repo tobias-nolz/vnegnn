@@ -1,4 +1,3 @@
-
 # VN-EGNN: E(3)-Equivariant Graph Neural Networks with Virtual Nodes Enhance Protein Binding Site Identification
 
 [![](https://img.shields.io/badge/dataset-zenodo-orange?style=plastic&logo=zenodo)](https://zenodo.org/records/17365855)
@@ -7,7 +6,7 @@
 
 # Overview
 
-Implementation of the VN-EGNN, state-of-the-art method for protein binding site identfication, by Florian Sestak, Lisa Schneckenreiter, Johannes Brandstetter, Sepp Hochreiter, Andreas Mayr, Günter Klambauer. This repository contains all code, instructions and model weights necessary to run the method or to retrain a model. If you have any question, feel free to open an issue or reach out to: <sestak@ml.jku.at>.
+Implementation of the VN-EGNN, state-of-the-art method for protein binding site identification, by Florian Sestak, Lisa Schneckenreiter, Johannes Brandstetter, Sepp Hochreiter, Andreas Mayr, Günter Klambauer. This repository contains all code, instructions and model weights necessary to run the method or to retrain a model. If you have any question, feel free to open an issue or reach out to: <sestak@ml.jku.at>.
 
 ![](visualizations/overview.jpg)
 
@@ -90,14 +89,15 @@ Run the following commands, to setup files used for training:
 ./process_data.sh
 ```
 To rerun the Equipocket baseline you need to specify MSMS path, for surface genration.
+To rerun the Equipocket baseline you need to specify MSMS path, for surface generation.
 ```bash
 ./process_data_equipocket.sh
 ```
 
-The splits for each experiments are provided in the uploaded dataset, e.g. COACH420 (``data/data/coach420/splits``).
+The splits for each experiment are provided in the uploaded dataset, e.g. COACH420 (``data/data/coach420/splits``).
 
 # Experiments
-Experiment are logged via Weights and Biases, use the [RUN_ID] to evalute the model. To reproduce the results in our publication, run the following commands for the individuall experiments. The evaluation metrics are loggend in wandb and can then be exported as csv for further processing.
+Experiment are logged via Weights and Biases, use the [RUN_ID] to evaluate the model. To reproduce the results in our publication, run the following commands for the individual experiments. The evaluation metrics are logged in wandb and can then be exported as csv for further processing.
 If you run an experiment, our script saves the graph as dataset, as described in [Pytorch Geometric](https://pytorch-geometric.readthedocs.io/en/latest/notes/create_dataset.html).
 
 
@@ -120,7 +120,7 @@ python src/eval.py wandb_run_id=[RUN_ID]
 ```
 
 ## VN-EGNN (Train GRASP benchmark)
-We also compared VN-EGNN on a different scPDB dataset split proposed by [GrASP](https://pubs.acs.org/doi/10.1021/acs.jcim.3c01698). The datasets for this, can be found in their provided repository. (To rerun their experiments, place their datasets under ``data/grasp`` and run the data processing pipline desribed above on this folder.)
+We also compared VN-EGNN on a different scPDB dataset split proposed by [GrASP](https://pubs.acs.org/doi/10.1021/acs.jcim.3c01698). The datasets for this, can be found in their provided repository. (To rerun their experiments, place their datasets under ``data/grasp`` and run the data processing pipline described above on this folder.)
 ```
 # Train
 python src/train.py experiment=vnegnn_pdbbind2020
