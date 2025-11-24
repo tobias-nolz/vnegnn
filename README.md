@@ -110,7 +110,7 @@ python scripts/process_data.py \
 ```
 
 | Argument      | Short | Type    | Required | Default                 | Description                                                           |
-      |---------------|-------|---------|----------|-------------------------|-----------------------------------------------------------------------|
+|---------------|-------|---------|----------|-------------------------|-----------------------------------------------------------------------|
 | `--data-dir`  | `-p`  | `str`   | ❌ No     | `data/allosteric-sites` | Data folder containing protein subfolders                             |
 | `--jobs`      | `-j`  | `int`   | ❌ No     | `1`                     | Number of parallel jobs to pass to scripts                            |
 | `--device`    | `-d`  | `str`   | ❌ No     | `"auto"`                | Device to use for ESM embedding generation (`auto`, `cpu`, or `cuda`) |
