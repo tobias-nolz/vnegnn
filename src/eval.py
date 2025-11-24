@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import hydra
+import sys
 import lightning as pl
 import pandas as pd
 import rootutils
@@ -11,13 +12,13 @@ from lightning import LightningDataModule, LightningModule, Trainer
 from lightning.pytorch.loggers import Logger
 from omegaconf import DictConfig
 from tqdm.auto import tqdm
+from hydra.core.hydra_config import HydraConfig
 
 allow_ops_in_compiled_graph()
 
 torch.set_float32_matmul_precision("high")
 
 rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
-
 
 from src.utils import (  # noqa: E402
     RankedLogger,
@@ -80,23 +81,27 @@ def evaluate(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     run_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
 
     for (
-        dataloader_name,
-        dataloader_index,
+            dataloader_name,
+            dataloader_index,
     ) in tqdm(datamodule.test_dataloader_indices.items()):
-        log.info(f"Evaluating {dataloader_name}...")
+        log.info(f"Processing {dataloader_name}...")
         dataloader = datamodule.test_dataloader()[dataloader_index]
         dataset = dataloader.dataset
 
+        log.info(f"Predicting {dataloader_name}...")
         predictions = trainer.predict(
             model=model,
             dataloaders=dataloader,
             ckpt_path=cfg.ckpt_path,
         )
+
+        log.info(f"Converting {dataloader_name} predictions to dataframe...")
         predictions_df = predictions_to_df(predictions)
         predictions_df.to_csv(
             run_dir / f"predictions_{dataloader_name}.csv", index=False
         )
 
+        log.info(f"Evaluating all {dataloader_name} proteins...")
         res = evaluate_all_proteins(
             df=predictions_df,
             protein_path=Path(dataset.raw_dir),
@@ -131,7 +136,21 @@ def main(cfg: DictConfig) -> None:
     )
 
     merge_config_section(cfg, cfg_wandb, "model")
-    merge_config_section(cfg, cfg_wandb, "data")
+
+    # robustly obtain Hydra runtime overrides (with fallbacks)
+    hydra_cfg = HydraConfig.get()
+    overrides = hydra_cfg.get("runtime", {}).get("overrides", [])
+    if not overrides:
+        log.info("Falling back to hydra_cfg.runtime.overrides")
+        overrides = hydra_cfg.get("overrides", [])
+    if not overrides:
+        log(info="Falling back to sys.argv for overrides")
+        overrides = [arg for arg in sys.argv[1:] if arg.startswith("+data=") or arg.startswith("data=")]
+
+    if any(o.startswith("+data=") for o in overrides):
+        log.info("Detected CLI `data` override, skipping merging `data` from WandB.")
+    else:
+        merge_config_section(cfg, cfg_wandb, "data")
 
     if hasattr(cfg, "ckpt_path"):
         cfg.ckpt_path = load_ckpt_path(
