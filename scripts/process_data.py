@@ -23,7 +23,7 @@ def run_command(cmd, cwd=None):
     "-p",
     required=True,
     type=click.Path(),
-    default=Path.cwd() / "data" / "allosteric-sites",
+    default=Path.cwd() / "data" / "allosteric-sites" / "allosteric",
     help="Data folder containing a raw subfolder with the protein subfolders"
 )
 @click.option(

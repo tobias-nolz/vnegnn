@@ -101,7 +101,7 @@ def setup_splits(
     required=True,
     type=click.Path(),
     help="Directory where PDB folders will be stored (one folder per PDB)",
-    default=Path.cwd() / "data" / "allosteric-sites"
+    default=Path.cwd() / "data" / "allosteric-sites" / "allosteric"
 )
 @click.option(
     "--asd-file",

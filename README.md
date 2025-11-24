@@ -80,12 +80,12 @@ In addition, you need perform the following steps, as also described in the orig
     [--no-skip]
    ```
     
-    | Argument       | Short | Type   | Required | Default                 | Description                                                                                                     |
-    |----------------|-------|--------|----------|-------------------------|-----------------------------------------------------------------------------------------------------------------|
-    | `--asd-file`   | `-a`  | `str`  | ✅ Yes    | —                       | Path to ASD dataset file (CSV/TSV) containing columns `allosteric_pdb`, `modulator_chain`, and `modulator_resi` |
-    | `--output-dir` | `-o`  | `str`  | ❌ No     | `data/allosteric-sites` | Directory where allosteric-site data will be stored.                                                            |
-    | `--jobs`       | `-j`  | `int`  | ❌ No     | `1`                     | Number of parallel workers                                                                                      |
-    | `--no-skip`    | —     | `flag` | ❌ No     | `False`                 | If set, do **not** skip already extracted ligand files                                                          |
+    | Argument       | Short | Type   | Required | Default                            | Description                                                                                                     |
+    |----------------|-------|--------|----------|------------------------------------|-----------------------------------------------------------------------------------------------------------------|
+    | `--asd-file`   | `-a`  | `str`  | ✅ Yes    | —                                  | Path to ASD dataset file (CSV/TSV) containing columns `allosteric_pdb`, `modulator_chain`, and `modulator_resi` |
+    | `--output-dir` | `-o`  | `str`  | ❌ No     | `data/allosteric-sites/allosteric` | Directory where allosteric-site data will be stored.                                                            |
+    | `--jobs`       | `-j`  | `int`  | ❌ No     | `1`                                | Number of parallel workers                                                                                      |
+    | `--no-skip`    | —     | `flag` | ❌ No     | `False`                            | If set, do **not** skip already extracted ligand files                                                          |
 
 This will create a directory structure suitable for evaluation.
 
@@ -109,13 +109,13 @@ python scripts/process_data.py \
 --threshold <distance_threshold>
 ```
 
-| Argument      | Short | Type    | Required | Default                 | Description                                                           |
-|---------------|-------|---------|----------|-------------------------|-----------------------------------------------------------------------|
-| `--data-dir`  | `-p`  | `str`   | ❌ No     | `data/allosteric-sites` | Data folder containing protein subfolders                             |
-| `--jobs`      | `-j`  | `int`   | ❌ No     | `1`                     | Number of parallel jobs to pass to scripts                            |
-| `--device`    | `-d`  | `str`   | ❌ No     | `"auto"`                | Device to use for ESM embedding generation (`auto`, `cpu`, or `cuda`) |
-| `--batch`     | `-b`  | `int`   | ❌ No     | `1`                     | Batch size for ESM embedding generation                               |
-| `--threshold` | `-t`  | `float` | ❌ No     | `4.0`                   | Distance threshold for binding site detection                         |
+| Argument      | Short | Type    | Required | Default                            | Description                                                           |
+|---------------|-------|---------|----------|------------------------------------|-----------------------------------------------------------------------|
+| `--data-dir`  | `-p`  | `str`   | ❌ No     | `data/allosteric-sites/allosteric` | Data folder containing protein subfolders                             |
+| `--jobs`      | `-j`  | `int`   | ❌ No     | `1`                                | Number of parallel jobs to pass to scripts                            |
+| `--device`    | `-d`  | `str`   | ❌ No     | `"auto"`                           | Device to use for ESM embedding generation (`auto`, `cpu`, or `cuda`) |
+| `--batch`     | `-b`  | `int`   | ❌ No     | `1`                                | Batch size for ESM embedding generation                               |
+| `--threshold` | `-t`  | `float` | ❌ No     | `4.0`                              | Distance threshold for binding site detection                         |
 
 Without parameters, the script will process the data for the allosteric site prediction. For the other datasets, you
 need to specify the data directory.
