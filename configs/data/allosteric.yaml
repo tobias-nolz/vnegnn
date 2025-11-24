@@ -1,0 +1,2 @@
+_target_: src.datasets.allosteric_dataset.AllostericDataModule
+root: ${paths.data_dir}/allosteric_sites

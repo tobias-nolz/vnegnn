@@ -277,7 +277,7 @@ class BindingDataModule(pl.LightningDataModule):
                 complex_names = [
                     c for c in complex_names if c not in blacklist and c not in leakage
                 ]
-            case "coach420" | "holo4k" | "pdbbind2020":
+            case "coach420" | "holo4k" | "pdbbind2020" | "allosteric":
                 dataset_path = self.root / mode
                 complex_names_path = dataset_path / "splits" / f"test_ids_{mode}"
                 with open(complex_names_path, "r") as f:
