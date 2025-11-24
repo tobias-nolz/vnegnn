@@ -1,94 +1,135 @@
-# VN-EGNN: E(3)-Equivariant Graph Neural Networks with Virtual Nodes Enhance Protein Binding Site Identification
+# Evaluation of the VN-EGNN Model for Allosteric Site Prediction
 
 [![](https://img.shields.io/badge/dataset-zenodo-orange?style=plastic&logo=zenodo)](https://zenodo.org/records/17365855)
 
-
-
 # Overview
 
-Implementation of the VN-EGNN, state-of-the-art method for protein binding site identification, by Florian Sestak, Lisa Schneckenreiter, Johannes Brandstetter, Sepp Hochreiter, Andreas Mayr, Günter Klambauer. This repository contains all code, instructions and model weights necessary to run the method or to retrain a model. If you have any question, feel free to open an issue or reach out to: <sestak@ml.jku.at>.
+The VN-EGNN model can be found on [GitHub](https://github.com/ml-jku/vnegnn).
 
-![](visualizations/overview.jpg)
+This branch is currently WIP. It is designed to evaluate the VN-EGNN model for allosteric site prediction on the ASD (
+Allosteric Database) dataset.
 
 # Installation
 
-## Requirements
-- Python 3.9+
-- PyTorch 2.1+ (2.7+ recommended)
-- CUDA 11.8+ or 12.x (for GPU support)
-- PyTorch Geometric 2.4+
+## Setup
 
-## Quick Setup
+### OS Requirements
 
-### 1. Clone the repository:
-```bash
-git clone https://github.com/ml-jku/vnegnn
-cd vnegnn
-```
+Note that I recommend using a Linux-based OS for compatibility and ease of setup. Windows users may consider using
+WSL2 (Windows Subsystem for Linux). For more info, see [here](https://learn.microsoft.com/en-us/windows/wsl/install).
 
-### 2. Create and activate conda environment:
-```bash
-conda env create -f environment.yaml
-conda activate vnegnn
-```
+### Repository
 
-### 3. Install PyTorch with CUDA support:
-
-Choose the appropriate command based on your CUDA version. Visit [PyTorch Get Started](https://pytorch.org/get-started/locally/) for other configurations.
-
-For CUDA 12.x:
-```bash
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-```
-
-### 4. Install PyTorch Geometric and CUDA-dependent extensions:
-
-The `torch-scatter`, `torch-sparse`, and `torch-cluster` packages are CUDA-version specific and must match your PyTorch and CUDA versions.
-
-First, check your PyTorch and CUDA versions:
-```bash
-python -c "import torch; print(f'PyTorch: {torch.__version__}, CUDA: {torch.version.cuda}')"
-```
-
-Then install PyTorch Geometric and extensions. Replace `${TORCH}` with your PyTorch version (e.g., `2.1.0`, `2.7.0`) and `${CUDA}` with your CUDA version (e.g., `cu121`, `cu118`, `cpu`):
+Clone this repository.
 
 ```bash
-pip install torch-geometric
-pip install torch-scatter torch-sparse torch-cluster -f https://data.pyg.org/whl/torch-${TORCH}+${CUDA}.html
-```
+git clone https://github.com/tobias-nolz/vnegnn-allosteric-sites
+````
 
-**Examples:**
+### Environment
 
-
-For PyTorch 2.7.0 with CUDA 12.8:
-```bash
-pip install torch-geometric
-pip install torch-scatter torch-sparse torch-cluster -f https://data.pyg.org/whl/torch-2.7.0+cu128.html
-```
-
-> **Note:** See the [PyTorch Geometric Installation Guide](https://pytorch-geometric.readthedocs.io/en/latest/install/installation.html) for the full list of available wheel versions.
-
-### Verify Installation
+I provide a modified `environment.yml` file for conda to set up the required environment. Create the conda environment
+as follows:
 
 ```bash
-python -c "import torch; import torch_geometric; print(f'PyTorch: {torch.__version__}'); print(f'PyG: {torch_geometric.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}')"
+conda env create -f environment.yml
+conda activate vnegnn-allosteric-sites
 ```
 
-### Setup environment variables
+In addition, you need perform the following steps, as also described in the original VN-EGNN repository:
 
-Setup the environment variables for logging in ``.env``, a template can be found here ``.env.template``.
-
-```bash
-source .env
-```
+1. Install `PyTorch` (with CUDA support if applicable) by following the instructions
+   at [pytorch.org](https://pytorch.org/get-started/locally/). Note that in the next step you will need to install
+   `PyTorch Geometric` and related packages, which depend on your `PyTorch` version and might not be available for the
+   latest `PyTorch` version right away. For example, for `PyTorch 2.9.0` with `CUDA 12.9`, you can run:
+    ```bash
+   pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cu129
+    ```
+2. Install `PyTorch Geometric` and related packages. As noted above, make sure to select the correct versions
+   compatible with your `PyTorch` installation. Therefore, first check your installed `PyTorch` version:
+    ```bash
+   python -c "import torch; print(f'PyTorch: {torch.__version__}, CUDA: {torch.version.cuda}')"
+    ```
+   Then, install the required packages. An example for `PyTorch 2.8.0` with `CUDA 12.9` is shown below. Adjust the URL
+   accordingly for your setup.
+   ```bash
+    pip install torch-geometric
+    pip install torch-scatter torch-sparse torch-cluster -f https://data.pyg.org/whl/torch-2.8.0+cu129.html
+    ```
+   For a list of available versions, see
+   the [PyTorch Geometric installation guide](https://pytorch-geometric.readthedocs.io/en/latest/notes/installation.html).
+3. Verify the installation by running the following command:
+   ```bash
+    python -c "import torch; import torch_geometric; print(f'PyTorch: {torch.__version__}, PyG: {torch_geometric.__version__}')"
+   ```
 
 # Data
-The datasets are processed and be downloaded from [this](https://zenodo.org/records/17365855) link. Place the datasets in the folder ``data/data``.
+
+## Setup Data
+
+### Allosteric Database
+
+1. Download the ASD dataset from the [Allosteric Database](http://mdl.shsmu.edu.cn/ASD/).
+
+2. Execute the provided script to download the required `protein.pdb` files and pre-process them.
+   ```bash
+    python scripts/allosteric-sites/setup_data.py \
+   --asd-file path/to/ASD_Release_xxxx_AS.txt \
+    --output-dir path/to/store/pdb_files \
+    --jobs <num_parallel_workers> \
+    [--no-skip]
+   ```
+    
+    | Argument       | Short | Type   | Required | Default                 | Description                                                                                                     |
+    |----------------|-------|--------|----------|-------------------------|-----------------------------------------------------------------------------------------------------------------|
+    | `--asd-file`   | `-a`  | `str`  | ✅ Yes    | —                       | Path to ASD dataset file (CSV/TSV) containing columns `allosteric_pdb`, `modulator_chain`, and `modulator_resi` |
+    | `--output-dir` | `-o`  | `str`  | ❌ No     | `data/allosteric-sites` | Directory where allosteric-site data will be stored.                                                            |
+    | `--jobs`       | `-j`  | `int`  | ❌ No     | `1`                     | Number of parallel workers                                                                                      |
+    | `--no-skip`    | —     | `flag` | ❌ No     | `False`                 | If set, do **not** skip already extracted ligand files                                                          |
+
+This will create a directory structure suitable for evaluation.
+
+### Other Datasets
+
+To compare the results to the original publication, you can also process the other datasets used in the VN-EGNN paper.
+The datasets are processed and be downloaded from [this](https://zenodo.org/records/17365855) link. Place the datasets
+in the folder ``data/data``. Also note that you will need the `sc-pdb` dataset for training the model.
+
+## Prepare Data for VN-EGNN
+
+Execute the following script to process the data for the VN-EGNN model. The script will use provided scripts from the
+VN-EGNN repository to generate esm embeddings and extract the binding info.
+
+```bash
+python scripts/process_data.py \
+--data-dir path/to/stored/pdb_files \
+--jobs <num_parallel_workers> \
+--device <cuda_or_cpu> \
+--batch <batch_size> \
+--threshold <distance_threshold>
+```
+
+| Argument      | Short | Type    | Required | Default                 | Description                                                           |
+      |---------------|-------|---------|----------|-------------------------|-----------------------------------------------------------------------|
+| `--data-dir`  | `-p`  | `str`   | ❌ No     | `data/allosteric-sites` | Data folder containing protein subfolders                             |
+| `--jobs`      | `-j`  | `int`   | ❌ No     | `1`                     | Number of parallel jobs to pass to scripts                            |
+| `--device`    | `-d`  | `str`   | ❌ No     | `"auto"`                | Device to use for ESM embedding generation (`auto`, `cpu`, or `cuda`) |
+| `--batch`     | `-b`  | `int`   | ❌ No     | `1`                     | Batch size for ESM embedding generation                               |
+| `--threshold` | `-t`  | `float` | ❌ No     | `4.0`                   | Distance threshold for binding site detection                         |
+
+Without parameters, the script will process the data for the allosteric site prediction. For the other datasets, you
+need to specify the data directory.
+
+## Data Structure
 
 ```
 📁 data
-├── 📁 data                # Processed datasets
-│   ├── 📁 coach420        # COACH420 dataset
+├── 📁 allosteric-sites    # Proccced ASD dataset for allosteric site prediction
+│   ├── 📁 allosteric       # ASD dataset
+│   │   ├── 📁 splits        # Dataset splits
+│   │   └── 📁 raw           # Raw data
+├── 📁 data                # Processed datasets from VN-EGNN publication
+│   ├── 📁 coach420         # COACH420 dataset
 │   │   ├── 📁 splits        # Dataset splits
 │   │   └── 📁 raw           # Raw data
 │   ├── 📁 holo4k          # Holo4K dataset
@@ -100,147 +141,135 @@ The datasets are processed and be downloaded from [this](https://zenodo.org/reco
 │   └── 📁 sc-pdb          # scPDB dataset
 │       ├── 📁 splits        # Dataset splits
 │       └── 📁 raw           # Raw data
-└── 📁 equipocket          # Equipocket dataset
+└── 📁 equipocket          # Equipocket dataset for equipocket baseline (optional)
     └── ...
 ```
 
-
-Run the following commands, to setup files used for training:
-```bash
-./process_data.sh
-```
-To rerun the Equipocket baseline you need to specify MSMS path, for surface generation.
-The data for Equipocket has to be saved in ``data/equipocket``, then run:
-```bash
-./process_data_equipocket.sh
-```
-
-The splits for each experiment are provided in the uploaded dataset, e.g. COACH420 (``data/data/coach420/splits``).
-
 # Experiments
-Experiment are logged via Weights and Biases, use the [RUN_ID] to evaluate the model. To reproduce the results in our publication, run the following commands for the individual experiments. The evaluation metrics are logged in wandb and can then be exported as csv for further processing.
-If you run an experiment, our script saves the graph as dataset, as described in [Pytorch Geometric](https://pytorch-geometric.readthedocs.io/en/latest/notes/create_dataset.html).
 
+Experiment are logged via Weights and Biases, use the [RUN_ID] to evaluate the model. The evaluation metrics are logged
+in wandb and can then be exported as csv for further processing.
 
-## VN-EGNN
-```
+## Model Training
+
+First, you will have to train the model to obtain the model weights. Everything is configured via Hydra configs and
+saved automatically.
+
+```bash
 # Train
 python src/train.py experiment=vnegnn
+```
 
-# Eval
+## Model Evaluation
+
+### Benchmark Datasets
+
+To check your model performance, you can run the evaluation with the same datasets as used in the paper to compare your
+results. For this, run
+
+```bash
 python src/eval.py wandb_run_id=[RUN_ID]
 ```
 
-## VN-EGNN (Train PDBBind2020)
-```
-# Train
-python src/train.py experiment=vnegnn_pdbbind2020
+### Allosteric Site Prediction
 
-# Eval
-python src/eval.py wandb_run_id=[RUN_ID]
-```
+To evaluate the model on the allosteric site prediction task, run the command with an override for the data config:
 
-## VN-EGNN (Train GRASP benchmark)
-We also compared VN-EGNN on a different scPDB dataset split proposed by [GrASP](https://pubs.acs.org/doi/10.1021/acs.jcim.3c01698). The datasets for this, can be found in their provided repository. (To rerun their experiments, place their datasets under ``data/grasp`` and run the data processing pipline described above on this folder.)
-```
-# Train
-python src/train.py experiment=vnegnn_pdbbind2020
-
-# Eval
-python src/eval.py wandb_run_id=[RUN_ID]
-```
-
-## Baseline Equipocket
-```
-# Train
-python src/train.py experiment=equipocket
-
-# Eval
-python src/eval.py wandb_run_id=[RUN_ID]
+```bash
+python src/eval.py +data=allosteric wandb_run_id=[RUN_ID]
 ```
 
 # Project structure
+
 ## Configruation
+
 Configuration is managed with Hydra configs, structured as follows.
 
 ```
+
 📁 configs
-├── 📁 callbacks                # Callbacks (e.g. checkpointing, ...)
-├── 📁 data                     # Dataset configs
-├── 📁 debug                    # Debug configs
-├── 📁 experiment               # Contains all experiments reported in the publication.
-├── 📁 extras                   # Extra configurations.
-├── 📁 hydra                    # Hydra configurations.
-├── 📁 local                    # Local setup files.
-├── 📁 logger                   # Logger setup (wandb logger was used for all experiments)
-├── 📁 model                    # Model configurations
-├── 📁 paths                    # Paths setup.
-├── 📁 trainer                  # Lighting trainer configuration
-├── 📄 eval.yaml                # Train config.
-└── 📄 train.yaml               # Eval config.
+├── 📁 callbacks # Callbacks (e.g. checkpointing, ...)
+├── 📁 data # Dataset configs
+├── 📁 debug # Debug configs
+├── 📁 experiment # Contains all experiments reported in the publication.
+├── 📁 extras # Extra configurations.
+├── 📁 hydra # Hydra configurations.
+├── 📁 local # Local setup files.
+├── 📁 logger # Logger setup (wandb logger was used for all experiments)
+├── 📁 model # Model configurations
+├── 📁 paths # Paths setup.
+├── 📁 trainer # Lighting trainer configuration
+├── 📄 eval.yaml # Train config.
+└── 📄 train.yaml # Eval config.
+
 ```
 
 ## Source code
-The following shows the structure of the source code. The training pipeline is setup with [Pytorch Lightning](https://lightning.ai/docs/pytorch/stable/).
+
+The following shows the structure of the source code. The training pipeline is setup
+with [Pytorch Lightning](https://lightning.ai/docs/pytorch/stable/).
 
 ```
+
 📁 src
-├── 📁 datasets                    # Dataset implementations
-│   ├── 📄 binding_dataset.py      # Binding site dataset class
-│   ├── 📄 equipocket_dataset.py   # Equipocket dataset class
-│   └── 📄 utils.py                # Dataset utilities
-├── 📁 models                      # Model architectures
-│   ├── 📁 equipocket              # Equipocket baseline models
-│   │   ├── 📄 baseline_models.py  # Baseline model implementations
-│   │   ├── 📄 egnn_clean.py       # Clean EGNN implementation
-│   │   ├── 📄 equipocket.py       # Equipocket model
-│   │   └── 📄 surface_egnn.py     # Surface-based EGNN
-│   └── 📁 vnegnn                  # VN-EGNN models
-│       ├── 📄 aggregation.py      # Aggregation layers
-│       ├── 📄 utils.py            # Model utilities
-│       └── 📄 vnegnn.py           # VN-EGNN implementation
-├── 📁 modules                     # Training components
-│   ├── 📄 callbacks.py            # Custom Lightning callbacks
-│   ├── 📄 cluster.py              # Clustering utilities
-│   ├── 📄 ema.py                  # Exponential moving average
-│   ├── 📄 losses.py               # Loss functions
-│   ├── 📄 metrics.py              # Evaluation metrics
-│   └── 📄 schedulers.py           # Learning rate schedulers
-├── 📁 utils                       # Utility functions
-│   ├── 📄 constants.py            # Constants and definitions
-│   ├── 📄 graph.py                # Graph processing utilities
-│   ├── 📄 instantiators.py        # Hydra instantiation helpers
-│   ├── 📄 logging_utils.py        # Logging utilities
-│   ├── 📄 misc.py                 # Miscellaneous utilities
-│   ├── 📄 protein.py              # Protein processing
-│   ├── 📄 pylogger.py             # Python logger
-│   ├── 📄 rich_utils.py           # Rich text formatting
-│   ├── 📄 tensor_utils.py         # Tensor manipulation
-│   ├── 📄 torch_utils.py          # PyTorch utilities
-│   └── 📄 utils.py                # General utilities
-├── 📁 wrappers                    # Lightning module wrappers
-│   ├── 📄 base.py                 # Base wrapper class
-│   ├── 📄 bindingsites.py         # VNEGNN wrapper
-│   └── 📄 equipocket.py           # Equipocket wrapper
-├── 📄 train.py                    # Training script
-└── 📄 eval.py                     # Evaluation script
+├── 📁 datasets # Dataset implementations
+│ ├── 📄 binding_dataset.py # Binding site dataset class
+│ ├── 📄 equipocket_dataset.py # Equipocket dataset class
+│ └── 📄 utils.py # Dataset utilities
+├── 📁 models # Model architectures
+│ ├── 📁 equipocket # Equipocket baseline models
+│ │ ├── 📄 baseline_models.py # Baseline model implementations
+│ │ ├── 📄 egnn_clean.py # Clean EGNN implementation
+│ │ ├── 📄 equipocket.py # Equipocket model
+│ │ └── 📄 surface_egnn.py # Surface-based EGNN
+│ └── 📁 vnegnn # VN-EGNN models
+│ ├── 📄 aggregation.py # Aggregation layers
+│ ├── 📄 utils.py # Model utilities
+│ └── 📄 vnegnn.py # VN-EGNN implementation
+├── 📁 modules # Training components
+│ ├── 📄 callbacks.py # Custom Lightning callbacks
+│ ├── 📄 cluster.py # Clustering utilities
+│ ├── 📄 ema.py # Exponential moving average
+│ ├── 📄 losses.py # Loss functions
+│ ├── 📄 metrics.py # Evaluation metrics
+│ └── 📄 schedulers.py # Learning rate schedulers
+├── 📁 utils # Utility functions
+│ ├── 📄 constants.py # Constants and definitions
+│ ├── 📄 graph.py # Graph processing utilities
+│ ├── 📄 instantiators.py # Hydra instantiation helpers
+│ ├── 📄 logging_utils.py # Logging utilities
+│ ├── 📄 misc.py # Miscellaneous utilities
+│ ├── 📄 protein.py # Protein processing
+│ ├── 📄 pylogger.py # Python logger
+│ ├── 📄 rich_utils.py # Rich text formatting
+│ ├── 📄 tensor_utils.py # Tensor manipulation
+│ ├── 📄 torch_utils.py # PyTorch utilities
+│ └── 📄 utils.py # General utilities
+├── 📁 wrappers # Lightning module wrappers
+│ ├── 📄 base.py # Base wrapper class
+│ ├── 📄 bindingsites.py # VNEGNN wrapper
+│ └── 📄 equipocket.py # Equipocket wrapper
+├── 📄 train.py # Training script
+└── 📄 eval.py # Evaluation script
+
 ```
 
-
-
-
+# Additional Information from the original VN-EGNN repository
 
 ## Citation
 
 ```
+
 @misc{sestak2024vnegnn,
-    title={VN-EGNN: E(3)-Equivariant Graph Neural Networks with Virtual Nodes Enhance Protein Binding Site Identification},
-    author={Florian Sestak and Lisa Schneckenreiter and Johannes Brandstetter and Sepp Hochreiter and Andreas Mayr and Günter Klambauer},
-    year={2024},
-    eprint={2404.07194},
-    archivePrefix={arXiv},
-    primaryClass={cs.LG}
+title={VN-EGNN: E(3)-Equivariant Graph Neural Networks with Virtual Nodes Enhance Protein Binding Site Identification},
+author={Florian Sestak and Lisa Schneckenreiter and Johannes Brandstetter and Sepp Hochreiter and Andreas Mayr and
+Günter Klambauer},
+year={2024},
+eprint={2404.07194},
+archivePrefix={arXiv},
+primaryClass={cs.LG}
 }
+
 ```
 
 ## License
