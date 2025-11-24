@@ -36,6 +36,7 @@ class BindingDataset(InMemoryDataset):
         graph_info: GraphInfo,
         label="train",
         n_jobs: int = cpu_count() - 1,
+        backend: str = "loky",
         random_rotations: bool = False,
         global_node_subsample_size: float = 1.0,
         sampling_strategy: Literal["fibonacci", "uniform"] = "fibonacci",
@@ -46,6 +47,7 @@ class BindingDataset(InMemoryDataset):
         self.graph_info = graph_info
         self.label = label
         self.n_jobs = n_jobs
+        self.backend = backend
 
         self.random_rotations = random_rotations
         self.global_node_subsample_size = global_node_subsample_size
@@ -104,10 +106,12 @@ class BindingDataset(InMemoryDataset):
                 return path.stem
 
         log.info(
-            "Starting parallel protein-to-graph conversion for %d proteins",
+            "Starting parallel protein-to-graph conversion for %d proteins, using backend=%s with %d jobs",
             len(self.raw_file_names),
+            self.backend,
+            self.n_jobs,
         )
-        results = Parallel(n_jobs=self.n_jobs, verbose=1, timeout=None)(
+        results = Parallel(n_jobs=self.n_jobs, verbose=1, timeout=None, backend=self.backend)(
             delayed(process_protein)(Path(f"{self.raw_dir}/{file_name}"))
             for file_name in tqdm(
                 self.raw_file_names,
@@ -219,6 +223,7 @@ class BindingDataModule(pl.LightningDataModule):
         sample_radius: bool = False,
         train_valid_split: float = 0,
         n_jobs: int = cpu_count() - 1,
+        backend: str = "loky",
         batch_size: int = 64,
         shuffle: bool = True,
         num_workers: int = 0,
@@ -250,6 +255,7 @@ class BindingDataModule(pl.LightningDataModule):
         self.force_reload = force_reload
         self.follow_batch = follow_batch
         self.n_jobs = n_jobs
+        self.backend = backend
 
     def _create_dataloader(
         self, mode: Literal["train", "valid", "coach420", "holo4k"]
@@ -292,6 +298,7 @@ class BindingDataModule(pl.LightningDataModule):
                 sampling_strategy=self.sampling_strategy,
                 sample_radius=self.sample_radius if mode == "train" else False,
                 n_jobs=self.n_jobs,
+                backend=self.backend,
                 force_reload=self.force_reload,
             ),
             batch_size=self.batch_size,
