@@ -1,9 +1,9 @@
-name: vnegnn
+name: vnegnn-allosteric-sites
 channels:
   - defaults
   - conda-forge
 dependencies:
-  - python=3.9
+  - python=3.11
 
   # Core scientific computing
   - numpy>=1.24.0
