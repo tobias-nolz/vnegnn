@@ -103,6 +103,7 @@ def prepare_pdb_directory(
 
     tqdm.write(f"[INFO] Starting download of {len(pdb_ids)} PDB files to {pdb_dir} using {n_jobs} workers...")
     counts = {"downloaded": 0, "exists": 0, "not_found": 0}
+    failed_downloads = []
 
     with ThreadPoolExecutor(max_workers=n_jobs) as ex:
         futures = {
@@ -121,8 +122,10 @@ def prepare_pdb_directory(
                 counts[status] += 1
                 if status == "not_found":
                     tqdm.write(f"[WARNING] {pid} not found on RCSB")
+                    failed_downloads.append(pid)
             except Exception as e:
                 tqdm.write(f"[ERROR] {pid} -> {e}")
+                failed_downloads.append(pid)
 
     tqdm.write("[INFO] PDB download complete.")
     if print_summary:
@@ -134,4 +137,14 @@ Not found (404/empty): {counts.get('not_found', 0)}
 Saved to: {pdb_dir.resolve()}
 ==============================
 """)
+
+    # Write failed downloads to a log file
+    if failed_downloads:
+        log_file = pdb_dir / "failed_pdb_downloads.log"
+        with open(log_file, 'w') as f:
+            f.write("pdb_id\n")
+            for pid in sorted(failed_downloads):
+                f.write(f"{pid}\n")
+        tqdm.write(f"[INFO] Failed downloads written to: {log_file}")
+
     return
