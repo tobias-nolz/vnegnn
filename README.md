@@ -79,16 +79,19 @@ For more information on the Allosteric Database (ASD) dataset, please refer to t
    --asd-file path/to/ASD_Release_xxxx_AS.txt \
     --output-dir path/to/store/pdb_files \
     --jobs <num_parallel_workers> \
-    [--no-skip]
+    [--force-ligand-extraction] \
+    [--clear-existing-pdb] \
+    [--verbose]
    ```
     
-    | Argument       | Short | Type   | Required | Default                            | Description                                                                                                     |
-    |----------------|-------|--------|----------|------------------------------------|-----------------------------------------------------------------------------------------------------------------|
-    | `--asd-file`   | `-a`  | `str`  | ✅ Yes    | —                                  | Path to ASD dataset file (CSV/TSV) containing columns `allosteric_pdb`, `modulator_chain`, and `modulator_resi` |
-    | `--output-dir` | `-o`  | `str`  | ❌ No     | `data/allosteric-sites/allosteric` | Directory where allosteric-site data will be stored.                                                            |
-    | `--jobs`       | `-j`  | `int`  | ❌ No     | `1`                                | Number of parallel workers                                                                                      |
-    | `--no-skip`    | —     | `flag` | ❌ No     | `False`                            | If set, do **not** skip already extracted ligand files                                                          |
-    | `--verbose`    | —     | `flag` | ❌ No     | `False`                            | If set, enables verbose logging                                                                                 |
+    | Argument                    | Short | Type   | Required | Default                            | Description                                                                                                     |
+    |-----------------------------|-------|--------|----------|------------------------------------|-----------------------------------------------------------------------------------------------------------------|
+    | `--asd-file`                | `-a`  | `str`  | ✅ Yes    | —                                  | Path to ASD dataset file (CSV/TSV) containing columns `allosteric_pdb`, `modulator_chain`, and `modulator_resi` |
+    | `--output-dir`              | `-o`  | `str`  | ❌ No     | `data/allosteric-sites/allosteric` | Directory where allosteric-site data will be stored.                                                            |
+    | `--jobs`                    | `-j`  | `int`  | ❌ No     | `1`                                | Number of parallel workers                                                                                      |
+    | `--force-ligand-extraction` | `-f`  | `flag` | ❌ No     | `False`                            | Force re-extraction of ligand files even if they already exist                                                  |
+    | `--clear-existing-pdb`      | `-c`  | `flag` | ❌ No     | `False`                            | Clear existing PDB files before downloading new ones                                                            |
+    | `--verbose`                 | `-v`  | `flag` | ❌ No     | `False`                            | Enable verbose logging                                                                                          |
 
 This will create a directory structure suitable for evaluation.
 

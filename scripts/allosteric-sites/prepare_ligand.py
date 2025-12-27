@@ -90,7 +90,7 @@ def extract_single_ligand(
         pdb_id: str,
         chain_ids_str: str,
         residue_ids_str: str,
-        skip_existing: bool = True
+        force_ligand_extraction: bool = False
 ) -> list[tuple[str, Path, str]]:
     """
     Extract ligand(s) from a PDB file and save them.
@@ -104,7 +104,7 @@ def extract_single_ligand(
     :param pdb_id: PDB ID of the protein
     :param chain_ids_str: Chain IDs - semicolon separates different ligands, comma separates chains for same ligand
     :param residue_ids_str: Residue IDs - semicolon separates different ligands
-    :param skip_existing: If True, skip extraction if ligand file already exists
+    :param force_ligand_extraction: If True, re-extract even if ligand file exists
     :return: List of tuples[status, ligand_out_file, diagnostic_message]
     """
     protein_dir = pdb_dir / f"{pdb_id}"
@@ -139,7 +139,7 @@ def extract_single_ligand(
             results.append(("empty", ligand_out_file, f"Invalid residue ID: {residue_id_str}"))
             continue
 
-        if skip_existing and ligand_out_file.exists():
+        if not force_ligand_extraction and ligand_out_file.exists():
             # Validate existing file has actual atom records
             if _is_valid_ligand_pdb(ligand_out_file):
                 results.append(("skipped", ligand_out_file, ""))
@@ -191,7 +191,7 @@ def _is_valid_ligand_pdb(pdb_file: Path) -> bool:
 def prepare_ligands_from_asd(
         pdb_dir: Path,
         ligand_info: pd.DataFrame,
-        skip_existing: bool = True,
+        force_ligand_extraction: bool = False,
         workers: int = 8,
         print_summary: bool = True,
         verbose: bool = False
@@ -200,7 +200,7 @@ def prepare_ligands_from_asd(
     Save ligand structures from ASD dataset PDB files.
     :param pdb_dir: Directory containing PDB files organized by PDB ID
     :param ligand_info: DataFrame with columns ['pdb_id', 'ligand_chain', 'ligand_residue']
-    :param skip_existing: If True, skip extraction if ligand file already exists
+    :param force_ligand_extraction: If True, re-extract ligands even if they already exist
     :param workers: Number of parallel workers for extraction
     :param print_summary: If True, print a summary of extraction results
     :param verbose: If True, print detailed diagnostic messages for failed extractions
@@ -218,7 +218,7 @@ def prepare_ligands_from_asd(
                 row['pdb_id'],
                 row['ligand_chain'],
                 row['ligand_residue'],
-                skip_existing
+                force_ligand_extraction
             ): (row['pdb_id'], row['ligand_chain'], row['ligand_residue'])
             for _, row in ligand_info.iterrows()
         }
