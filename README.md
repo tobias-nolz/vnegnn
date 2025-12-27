@@ -122,6 +122,10 @@ python scripts/process_data.py \
 Without parameters, the script will process the data for the allosteric site prediction. For the other datasets, you
 need to specify the data directory.
 
+Note: You will need MSMS installed and available in your PATH for surface generation. You can download MSMS from
+[here](https://ccsb.scripps.edu/msms/downloads/). After downloading, make sure to add the MSMS binary to your system PATH.
+
+
 ## Data Structure
 
 ```
