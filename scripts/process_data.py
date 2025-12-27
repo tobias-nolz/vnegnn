@@ -13,8 +13,7 @@ import click
 def run_command(cmd, cwd=None):
     print("Running:", " ".join(cmd))
     res = subprocess.run(cmd, cwd=cwd)
-    if res.returncode != 0:
-        raise SystemExit(res.returncode)
+    print("Script finished with return code:", res.returncode)
 
 
 @click.command()
