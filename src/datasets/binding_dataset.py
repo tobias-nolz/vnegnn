@@ -258,7 +258,7 @@ class BindingDataModule(pl.LightningDataModule):
         self.backend = backend
 
     def _create_dataloader(
-        self, mode: Literal["train", "valid", "coach420", "holo4k"]
+        self, mode: Literal["train", "valid", "coach420", "holo4k", "pdbbind2020", "allosteric"]
     ) -> DataLoader:
         match mode:
             case "train" | "valid":
@@ -347,7 +347,7 @@ class BindingPDBTrainDataModule(BindingDataModule):
         super().__init__(*args, **kwargs)
 
     def _create_dataloader(
-        self, mode: Literal["train", "valid", "coach420", "holo4k"]
+        self, mode: Literal["train", "valid", "coach420", "holo4k", "sc-pdb"]
     ) -> DataLoader:
         match mode:
             case "train" | "valid":
