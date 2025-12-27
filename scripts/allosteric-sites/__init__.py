@@ -16,6 +16,8 @@ from .prepare_ligand import (
     prepare_ligands_from_asd,
     diagnose_ligand_extraction,
     parse_chain_ids,
+    parse_residue_id,
+    find_closest_residue,
 )
 
 __all__ = [
@@ -26,5 +28,7 @@ __all__ = [
     "prepare_ligands_from_asd",
     "diagnose_ligand_extraction",
     "parse_chain_ids",
+    "parse_residue_id",
+    "find_closest_residue",
 ]
 

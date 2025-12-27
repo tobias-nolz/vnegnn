@@ -81,6 +81,7 @@ For more information on the Allosteric Database (ASD) dataset, please refer to t
     --jobs <num_parallel_workers> \
     [--force-ligand-extraction] \
     [--clear-existing-pdb] \
+    [--max-diff <int>] \
     [--verbose]
    ```
     
@@ -90,7 +91,8 @@ For more information on the Allosteric Database (ASD) dataset, please refer to t
     | `--output-dir`              | `-o`  | `str`  | ❌ No     | `data/allosteric-sites/allosteric` | Directory where allosteric-site data will be stored.                                                            |
     | `--jobs`                    | `-j`  | `int`  | ❌ No     | `1`                                | Number of parallel workers                                                                                      |
     | `--force-ligand-extraction` | `-f`  | `flag` | ❌ No     | `False`                            | Force re-extraction of ligand files even if they already exist                                                  |
-    | `--clear-existing-pdb`      | `-c`  | `flag` | ❌ No     | `False`                            | Clear existing PDB files before downloading new ones                                                            |
+    | `--clear-existing-pdb`      | —     | `flag` | ❌ No     | `False`                            | Clear existing PDB files before downloading new ones                                                            |
+    | `--max-diff`                | `-m`  | `int`  | ❌ No     | `0`                                | Maximum residue ID difference for fuzzy matching (0 = exact only, 2 = allow ±2)                                 |
     | `--verbose`                 | `-v`  | `flag` | ❌ No     | `False`                            | Enable verbose logging                                                                                          |
 
 This will create a directory structure suitable for evaluation.

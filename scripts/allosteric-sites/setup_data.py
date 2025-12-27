@@ -18,6 +18,7 @@ def setup_data(
         n_jobs: int,
         force_ligand_extraction: bool = False,
         clear_existing_pdb: bool = False,
+        max_diff: int = 0,
         verbose: bool = False
 ) -> None:
     """
@@ -32,6 +33,7 @@ def setup_data(
     :param n_jobs: Number of parallel workers for downloads/extraction.
     :param force_ligand_extraction: If True, re-extract ligands even if they already exist.
     :param clear_existing_pdb: If True, clear existing PDB files before downloading.
+    :param max_diff: Maximum residue ID difference for fuzzy matching (0 = exact match only).
     :param verbose: If True, enable verbose output.
     :return: None
     :raises ValueError: If the ASD dataset is empty or missing required columns.
@@ -83,11 +85,12 @@ def setup_data(
             'ligand_residue': asd_dataset['modulator_resi'],
         }
     )
-    tqdm.write(f"[INFO] Extracting ligands (force_ligand_extraction={force_ligand_extraction}, workers={n_jobs})")
+    tqdm.write(f"[INFO] Extracting ligands (force_ligand_extraction={force_ligand_extraction}, max_diff={max_diff}, workers={n_jobs})")
     prepare_ligands_from_asd(
         pdb_dir=output_dir,
         ligand_info=ligand_info,
         force_ligand_extraction=force_ligand_extraction,
+        max_diff=max_diff,
         workers=n_jobs,
         print_summary=True,
         verbose=verbose
@@ -153,10 +156,16 @@ def setup_splits(
 )
 @click.option(
     "--clear-existing-pdb",
-    "-c",
     is_flag=True,
     default=False,
     help="Clear existing PDB files before downloading new ones"
+)
+@click.option(
+    "--max-diff",
+    "-m",
+    default=0,
+    type=int,
+    help="Maximum residue ID difference for fuzzy matching (0 = exact match only, 2 = allow ±2)"
 )
 @click.option(
     "--verbose",
@@ -171,6 +180,7 @@ def main(
         jobs: int,
         force_ligand_extraction: bool,
         clear_existing_pdb: bool,
+        max_diff: int,
         verbose: bool
 ):
     print(f"Loading ASD dataset from: {asd_file}")
@@ -186,6 +196,7 @@ def main(
         n_jobs=jobs,
         force_ligand_extraction=force_ligand_extraction,
         clear_existing_pdb=clear_existing_pdb,
+        max_diff=max_diff,
         verbose=verbose
     )
 

@@ -25,6 +25,54 @@ def parse_chain_ids(chain_str: str) -> list[str]:
     return [c.strip() for c in chains if c.strip()]
 
 
+def parse_residue_id(residue_str: str) -> tuple[list[int], str]:
+    """
+    Parse residue ID string which may contain various formats.
+
+    Supported formats:
+    - Single: "501" -> ([501], None)
+    - Multiple comma: "401,402" -> ([401, 402], None)
+    - Multiple slash: "1585/1586" -> ([1585, 1586], None)
+    - Range: "1-141" -> ([], "range format - peptide ligand")
+
+    Returns:
+        tuple: (list of residue IDs, error message or None)
+    """
+    if not residue_str or pd.isna(residue_str):
+        return [], "Empty residue ID"
+
+    residue_str = str(residue_str).strip()
+
+    # Check for range format (e.g., "1-141") - these are peptide ligands, skip them
+    if re.match(r'^\d+-\d+$', residue_str):
+        return [], f"Range format '{residue_str}' indicates peptide ligand - skipping"
+
+    # Handle multiple residues separated by comma or slash
+    if ',' in residue_str or '/' in residue_str:
+        parts = re.split(r'[,/]+', residue_str)
+        residue_ids = []
+        for part in parts:
+            part = part.strip()
+            try:
+                residue_ids.append(int(part))
+            except ValueError:
+                return [], f"Invalid residue ID component: {part}"
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_ids = []
+        for rid in residue_ids:
+            if rid not in seen:
+                seen.add(rid)
+                unique_ids.append(rid)
+        return unique_ids, None
+
+    # Single residue ID
+    try:
+        return [int(residue_str)], None
+    except ValueError:
+        return [], f"Invalid residue ID: {residue_str}"
+
+
 class LigandSelect(Select):
     """Select residues matching any of the given chain IDs and residue ID."""
 
@@ -38,6 +86,46 @@ class LigandSelect(Select):
                     residue.id[1] == self.residue_id)
         except (ValueError, TypeError):
             return False
+
+
+def find_closest_residue(pdb_file: Path, chain_ids: list[str], target_residue: int, max_diff: int = 2) -> int | None:
+    """
+    Find the closest matching residue ID within max_diff of the target.
+    Only returns a match if it's a HETATM residue (ligand).
+
+    Args:
+        pdb_file: Path to the PDB file
+        chain_ids: List of chain IDs to search in
+        target_residue: Target residue ID
+        max_diff: Maximum allowed difference (default: 2)
+
+    Returns:
+        Matching residue ID or None if no close match found
+    """
+    parser = PDBParser(QUIET=True, PERMISSIVE=True)
+    try:
+        structure = parser.get_structure("protein", pdb_file)
+    except Exception:
+        return None
+
+    candidates = []
+    for model in structure:
+        for chain_id in chain_ids:
+            if chain_id not in [c.id for c in model]:
+                continue
+            chain = model[chain_id]
+            for residue in chain:
+                res_id = residue.id[1]
+                hetflag = residue.id[0]
+                # Only consider HETATM residues (ligands) that are close to target
+                if hetflag.strip() and abs(res_id - target_residue) <= max_diff:
+                    candidates.append(res_id)
+
+    if not candidates:
+        return None
+
+    # Return the closest match
+    return min(candidates, key=lambda x: abs(x - target_residue))
 
 
 def diagnose_ligand_extraction(pdb_file: Path, chain_ids: list[str], residue_id: int) -> str:
@@ -80,8 +168,10 @@ def diagnose_ligand_extraction(pdb_file: Path, chain_ids: list[str], residue_id:
         for res_set in available_residues.values():
             all_residues.update(res_set)
         closest = min(all_residues, key=lambda x: abs(x - residue_id), default=None)
-        return f"Residue {residue_id} not found in chains {chain_ids}. Closest: {closest}"
-
+        if closest is not None and abs(closest - residue_id) > 0:
+            return f"Residue {residue_id} not found in chains {chain_ids}. Closest: {closest} (diff {abs(closest - residue_id)})."
+        else:
+            return f"Residue {residue_id} not found in chains {chain_ids}. Available residues: {sorted(all_residues)}"
     return "Unknown issue - residue found but extraction failed"
 
 
@@ -90,21 +180,24 @@ def extract_single_ligand(
         pdb_id: str,
         chain_ids_str: str,
         residue_ids_str: str,
-        force_ligand_extraction: bool = False
+        force_ligand_extraction: bool = False,
+        max_diff: int = 0
 ) -> list[tuple[str, Path, str]]:
     """
     Extract ligand(s) from a PDB file and save them.
 
-    The ASD database can specify ligands in two ways:
+    The ASD database can specify ligands in various formats:
     1. Single ligand: chain_ids="A", residue_ids="501"
     2. Multiple separate ligands (semicolon-separated): chain_ids="A;B", residue_ids="501;502"
     3. Same ligand across multiple chains (comma-separated): chain_ids="A,B", residue_ids="501"
+    4. Multiple residues (comma or slash): residue_ids="401,402" or "1585/1586"
 
     :param pdb_dir: Directory containing the PDB files
     :param pdb_id: PDB ID of the protein
     :param chain_ids_str: Chain IDs - semicolon separates different ligands, comma separates chains for same ligand
     :param residue_ids_str: Residue IDs - semicolon separates different ligands
     :param force_ligand_extraction: If True, re-extract even if ligand file exists
+    :param max_diff: Maximum residue ID difference for fuzzy matching (0 = exact match only, 2 = allow ±2)
     :return: List of tuples[status, ligand_out_file, diagnostic_message]
     """
     protein_dir = pdb_dir / f"{pdb_id}"
@@ -113,59 +206,80 @@ def extract_single_ligand(
     if not pdb_file.exists():
         return [("missing", pdb_file, "PDB file not found")]
 
-    # Split by semicolon for multiple separate ligands
+    # Split by semicolon for multiple separate ligand entries
     chain_groups = str(chain_ids_str).split(";") if chain_ids_str else []
-    residue_ids_list = str(residue_ids_str).split(";") if residue_ids_str else []
+    residue_groups = str(residue_ids_str).split(";") if residue_ids_str else []
 
-    # Handle case where there's only one residue ID but multiple chain groups
-    if len(residue_ids_list) == 1 and len(chain_groups) > 1:
-        residue_ids_list = residue_ids_list * len(chain_groups)
+    # Handle case where there's only one residue group but multiple chain groups
+    if len(residue_groups) == 1 and len(chain_groups) > 1:
+        residue_groups = residue_groups * len(chain_groups)
 
-    if len(chain_groups) != len(residue_ids_list):
-        raise ValueError(f"Number of chain groups and residue IDs do not match for PDB ID {pdb_id}: "
-                        f"chains={chain_groups}, residues={residue_ids_list}")
+    if len(chain_groups) != len(residue_groups):
+        return [("empty", protein_dir / "ligand_0.pdb",
+                 f"Chain/residue count mismatch: {len(chain_groups)} chains, {len(residue_groups)} residues")]
 
     results = []
-    for i, (chain_group, residue_id_str) in enumerate(zip(chain_groups, residue_ids_list)):
-        ligand_out_file = protein_dir / f"ligand_{i}.pdb"
+    ligand_idx = 0
 
-        # Parse the chain group (may contain comma-separated chains like "A,B")
+    for chain_group, residue_group in zip(chain_groups, residue_groups):
+        # Parse chain IDs (may contain comma-separated chains like "A,B")
         chain_ids = parse_chain_ids(chain_group)
 
-        # Parse residue ID
-        try:
-            residue_id = int(residue_id_str.strip())
-        except (ValueError, AttributeError):
-            results.append(("empty", ligand_out_file, f"Invalid residue ID: {residue_id_str}"))
-            continue
-
-        if not force_ligand_extraction and ligand_out_file.exists():
-            # Validate existing file has actual atom records
-            if _is_valid_ligand_pdb(ligand_out_file):
-                results.append(("skipped", ligand_out_file, ""))
-                continue
-            # If existing file is invalid, re-extract
-            ligand_out_file.unlink()
-
         if not chain_ids:
-            results.append(("empty", ligand_out_file, "No valid chain IDs provided"))
+            results.append(("empty", protein_dir / f"ligand_{ligand_idx}.pdb", "No valid chain IDs provided"))
+            ligand_idx += 1
             continue
 
-        parser = PDBParser(QUIET=True, PERMISSIVE=True)
-        io = PDBIO()
-        structure = parser.get_structure(pdb_id, pdb_file)
-        io.set_structure(structure)
-        io.save(str(ligand_out_file), LigandSelect(chain_ids, residue_id))
+        # Parse residue IDs (may be single, comma-separated, slash-separated, or range)
+        residue_ids, error = parse_residue_id(residue_group)
 
-        # Validate the extracted ligand file contains actual atom records
-        if _is_valid_ligand_pdb(ligand_out_file):
-            results.append(("extracted", ligand_out_file, ""))
-        else:
-            # File is empty or invalid - diagnose and remove it
-            diagnostic = diagnose_ligand_extraction(pdb_file, chain_ids, residue_id)
-            if ligand_out_file.exists():
+        if error:
+            results.append(("empty", protein_dir / f"ligand_{ligand_idx}.pdb", error))
+            ligand_idx += 1
+            continue
+
+        # Extract each residue as a separate ligand file
+        for residue_id in residue_ids:
+            ligand_out_file = protein_dir / f"ligand_{ligand_idx}.pdb"
+            ligand_idx += 1
+
+            if not force_ligand_extraction and ligand_out_file.exists():
+                if _is_valid_ligand_pdb(ligand_out_file):
+                    results.append(("skipped", ligand_out_file, ""))
+                    continue
                 ligand_out_file.unlink()
-            results.append(("empty", ligand_out_file, diagnostic))
+
+            # Try to extract with exact residue ID
+            parser = PDBParser(QUIET=True, PERMISSIVE=True)
+            io = PDBIO()
+            structure = parser.get_structure(pdb_id, pdb_file)
+            io.set_structure(structure)
+            io.save(str(ligand_out_file), LigandSelect(chain_ids, residue_id))
+
+            if _is_valid_ligand_pdb(ligand_out_file):
+                results.append(("extracted", ligand_out_file, ""))
+            elif max_diff > 0:
+                # Try fuzzy matching - find closest HETATM residue within ±max_diff
+                closest = find_closest_residue(pdb_file, chain_ids, residue_id, max_diff=max_diff)
+                if closest and closest != residue_id:
+                    # Re-extract with corrected residue ID
+                    io.save(str(ligand_out_file), LigandSelect(chain_ids, closest))
+                    if _is_valid_ligand_pdb(ligand_out_file):
+                        results.append(("extracted", ligand_out_file,
+                                       f"Fuzzy matched: {residue_id} -> {closest}"))
+                        continue
+
+                # Fuzzy match failed - diagnose and report
+                if ligand_out_file.exists():
+                    ligand_out_file.unlink()
+                diagnostic = diagnose_ligand_extraction(pdb_file, chain_ids, residue_id)
+                results.append(("empty", ligand_out_file, diagnostic))
+            else:
+                # No fuzzy matching - diagnose and report
+                if ligand_out_file.exists():
+                    ligand_out_file.unlink()
+                diagnostic = diagnose_ligand_extraction(pdb_file, chain_ids, residue_id)
+                results.append(("empty", ligand_out_file, diagnostic))
 
     return results
 
@@ -192,6 +306,7 @@ def prepare_ligands_from_asd(
         pdb_dir: Path,
         ligand_info: pd.DataFrame,
         force_ligand_extraction: bool = False,
+        max_diff: int = 0,
         workers: int = 8,
         print_summary: bool = True,
         verbose: bool = False
@@ -201,6 +316,7 @@ def prepare_ligands_from_asd(
     :param pdb_dir: Directory containing PDB files organized by PDB ID
     :param ligand_info: DataFrame with columns ['pdb_id', 'ligand_chain', 'ligand_residue']
     :param force_ligand_extraction: If True, re-extract ligands even if they already exist
+    :param max_diff: Maximum residue ID difference for fuzzy matching (0 = exact match only)
     :param workers: Number of parallel workers for extraction
     :param print_summary: If True, print a summary of extraction results
     :param verbose: If True, print detailed diagnostic messages for failed extractions
@@ -210,6 +326,22 @@ def prepare_ligands_from_asd(
     counts = {"extracted": 0, "skipped": 0, "missing": 0, "empty": 0, "errors": 0}
     failed_extractions = []
 
+    # Group ligands by PDB ID to avoid race conditions when multiple rows have the same PDB
+    # and to correctly number ligands across all entries for the same PDB
+    grouped = ligand_info.groupby('pdb_id').agg({
+        'ligand_chain': lambda x: ';'.join(str(v) for v in x),
+        'ligand_residue': lambda x: ';'.join(str(v) for v in x)
+    }).reset_index()
+
+    # Count total ligands after grouping (each semicolon-separated value is a ligand)
+    total_ligands = sum(
+        len(str(row['ligand_residue']).split(';'))
+        for _, row in grouped.iterrows()
+    )
+
+    tqdm.write(
+        f"[INFO] Found {len(ligand_info)} dataset entries across {len(grouped)} unique PDB IDs ({total_ligands} total ligands)")
+
     with ThreadPoolExecutor(max_workers=workers) as ex:
         futures = {
             ex.submit(
@@ -218,9 +350,10 @@ def prepare_ligands_from_asd(
                 row['pdb_id'],
                 row['ligand_chain'],
                 row['ligand_residue'],
-                force_ligand_extraction
+                force_ligand_extraction,
+                max_diff
             ): (row['pdb_id'], row['ligand_chain'], row['ligand_residue'])
-            for _, row in ligand_info.iterrows()
+            for _, row in grouped.iterrows()
         }
 
         for future in tqdm(as_completed(futures), total=len(futures), desc="Extracting ligands"):
@@ -255,7 +388,7 @@ Errors: {counts['errors']}
 
         if failed_extractions and not verbose:
             tqdm.write(f"[INFO] {len(failed_extractions)} ligands could not be extracted. "
-                      f"Run with verbose=True for details.")
+                       f"Run with verbose=True for details.")
 
     # Write failed extractions to a log file for debugging
     if failed_extractions:
