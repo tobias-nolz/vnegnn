@@ -188,7 +188,7 @@ def process_single_complex(complex_path: Path, threshold: float = 4) -> bool:
         if not protein_path.exists():
             click.echo(f"Warning: {protein_path} not found, skipping {complex_path}")
             return False
-        protein = PDBParser().get_structure("protein", str(protein_path))
+        protein = PDBParser(QUIET=True).get_structure("protein", str(protein_path))
         protein_info = extract_protein_info(protein)
 
         ligand_paths = [
