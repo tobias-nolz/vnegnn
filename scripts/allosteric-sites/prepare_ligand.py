@@ -50,7 +50,7 @@ def extract_single_ligand(
         raise ValueError(f"Number of chain IDs and residue IDs do not match for PDB ID {pdb_id}")
 
     results = []
-    for i, (chain_id, residue_ids) in enumerate(zip(chain_ids, residue_ids)):
+    for i, (chain_id, residue_id) in enumerate(zip(chain_ids, residue_ids)):
         ligand_out_file = protein_dir / f"ligand_{i}.pdb"
 
         if skip_existing and ligand_out_file.exists():
@@ -61,7 +61,7 @@ def extract_single_ligand(
         io = PDBIO()
         structure = parser.get_structure(pdb_id, pdb_file)
         io.set_structure(structure)
-        io.save(str(ligand_out_file), LigandSelect(chain_id, residue_ids))
+        io.save(str(ligand_out_file), LigandSelect(chain_id, residue_id))
         results.append(("extracted", ligand_out_file))
 
     return results
@@ -84,7 +84,7 @@ def prepare_ligands_from_asd(
     :return: None
     """
     tqdm.write("[INFO] Preparing ligands from ASD dataset...")
-    counts = {"extracted": 0, "skipped": 0, "missing": 0}
+    counts = {"extracted": 0, "skipped": 0, "missing": 0, "errors": 0}
 
     with ThreadPoolExecutor(max_workers=workers) as ex:
         futures = {
@@ -105,10 +105,11 @@ def prepare_ligands_from_asd(
                 results = future.result()
                 for status, _ in results:
                     counts[status] += 1
-                if status == "missing":
-                    tqdm.write(f"[WARNING] PDB file missing for {pdb_id}")
+                    if status == "missing":
+                        tqdm.write(f"[WARNING] PDB file missing for {pdb_id}")
             except Exception as e:
                 tqdm.write(f"[ERROR] Failed to extract ligand for {pdb_id} chain {chain_id}: {e}")
+                counts["errors"] += 1
 
     tqdm.write("[INFO] Ligand preparation complete.")
     if print_summary:
@@ -117,6 +118,7 @@ def prepare_ligands_from_asd(
 Extracted: {counts['extracted']}
 Skipped (existing): {counts['skipped']}
 Missing PDB files: {counts['missing']}
+Errors: {counts['errors']}
 ===============================
 """)
     return
