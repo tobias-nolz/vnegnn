@@ -88,6 +88,7 @@ For more information on the Allosteric Database (ASD) dataset, please refer to t
     | `--output-dir` | `-o`  | `str`  | ❌ No     | `data/allosteric-sites/allosteric` | Directory where allosteric-site data will be stored.                                                            |
     | `--jobs`       | `-j`  | `int`  | ❌ No     | `1`                                | Number of parallel workers                                                                                      |
     | `--no-skip`    | —     | `flag` | ❌ No     | `False`                            | If set, do **not** skip already extracted ligand files                                                          |
+    | `--verbose`    | —     | `flag` | ❌ No     | `False`                            | If set, enables verbose logging                                                                                 |
 
 This will create a directory structure suitable for evaluation.
 

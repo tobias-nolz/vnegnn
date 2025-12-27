@@ -17,6 +17,7 @@ def setup_data(
         asd_dataset: pd.DataFrame,
         n_jobs: int,
         skip_existing: bool = False,
+        verbose: bool = False
 ) -> None:
     """
     Setup data for VN-EGNN allosteric site prediction.
@@ -29,28 +30,49 @@ def setup_data(
     :param asd_dataset: DataFrame containing ASD dataset information.
     :param n_jobs: Number of parallel workers for downloads/extraction.
     :param skip_existing: If True, skip creating files that already exist.
+    :param verbose: If True, enable verbose output.
     :return: None
+    :raises ValueError: If the ASD dataset is empty or missing required columns.
     """
     output_dir = Path(output_dir)
 
     if asd_dataset is None or asd_dataset.empty:
         raise ValueError("ASD dataset is empty or not provided")
 
-    # Extract PDB ids from the ASD dataset
-    if 'allosteric_pdb' not in asd_dataset.columns:
-        raise KeyError("ASD dataset must contain column 'allosteric_pdb'")
+    # Validate required columns
+    required_columns = {'allosteric_pdb', 'modulator_chain', 'modulator_resi'}
+    missing_columns = required_columns - set(asd_dataset.columns)
+    if missing_columns:
+        raise KeyError(f"ASD dataset is missing required columns: {missing_columns}")
 
+    # Filter out rows with missing PDB IDs or ligand info
+    initial_count = len(asd_dataset)
+    mask = asd_dataset[['allosteric_pdb', 'modulator_chain', 'modulator_resi']].isna().any(axis=1)
+    filtered_rows = asd_dataset[mask]
+    asd_dataset = asd_dataset[~mask]
+    filtered_count = initial_count - len(asd_dataset)
+
+    if filtered_count > 0:
+        tqdm.write(f"[INFO] Filtered out {filtered_count} rows with missing values")
+        # Log filtered rows to file
+        log_file = output_dir / "filtered_rows.log"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        filtered_rows.to_csv(log_file, sep='\t', index=False)
+        tqdm.write(f"[INFO] Filtered rows written to: {log_file}")
+
+    if asd_dataset.empty:
+        raise ValueError("No valid entries remain after filtering missing values")
+
+    # Prepare PDB directory (download PDB files)
     pdb_ids = asd_dataset['allosteric_pdb'].tolist()
-    tqdm.write(f"Preparing PDB directory at {output_dir} with {len(pdb_ids)} PDBs (workers={n_jobs})")
+    tqdm.write(f"[INFO] Preparing PDB directory at {output_dir} with {len(pdb_ids)} entries (workers={n_jobs})")
     prepare_pdb_directory(
         pdb_dir=output_dir,
         pdb_ids=pdb_ids,
         n_jobs=n_jobs
     )
 
-    if not {'modulator_chain', 'modulator_resi'}.issubset(asd_dataset.columns):
-        raise KeyError("ASD dataset must contain columns 'modulator_chain' and 'modulator_resi' for ligand extraction")
-
+    # Extract ligands from PDB files
     ligand_info = pd.DataFrame(
         {
             'pdb_id': asd_dataset['allosteric_pdb'],
@@ -58,12 +80,14 @@ def setup_data(
             'ligand_residue': asd_dataset['modulator_resi'],
         }
     )
-    tqdm.write(f"Extracting ligands (skip_existing={skip_existing}, workers={n_jobs})")
+    tqdm.write(f"[INFO] Extracting ligands (skip_existing={skip_existing}, workers={n_jobs})")
     prepare_ligands_from_asd(
         pdb_dir=output_dir,
         ligand_info=ligand_info,
         skip_existing=skip_existing,
-        workers=n_jobs
+        workers=n_jobs,
+        print_summary=True,
+        verbose=verbose
     )
 
 
@@ -123,11 +147,18 @@ def setup_splits(
     default=False,
     help="Do not skip existing extracted ligand files"
 )
+@click.option(
+    "--verbose",
+    is_flag=True,
+    default=False,
+    help="Enable verbose output"
+)
 def main(
         output_dir: Path,
         asd_file: Path,
         jobs: int,
-        no_skip: bool
+        no_skip: bool,
+        verbose: bool
 ):
     print(f"Loading ASD dataset from: {asd_file}")
     asd_df = _read_asd_dataset(asd_file)
@@ -140,7 +171,8 @@ def main(
         output_dir=raw_dir,
         asd_dataset=asd_df,
         n_jobs=jobs,
-        skip_existing=not no_skip
+        skip_existing=not no_skip,
+        verbose=verbose
     )
 
     split_dir = output_dir / 'splits'

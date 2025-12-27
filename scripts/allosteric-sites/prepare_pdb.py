@@ -95,13 +95,11 @@ def prepare_pdb_directory(
     :return: None
     """
     pdb_ids = sorted({pid for raw in pdb_ids if raw for pid in normalize_pdb_tokens(raw)})
-    os.makedirs(pdb_dir, exist_ok=True)
+    pdb_dir.mkdir(parents=True, exist_ok=True)
 
     if clear_existing:
-        for root, _, files in os.walk(pdb_dir):
-            for file in files:
-                if file.endswith(".pdb"):
-                    os.remove(os.path.join(root, file))
+        for pdb_file in pdb_dir.rglob("*.pdb"):
+            pdb_file.unlink()
 
     tqdm.write(f"[INFO] Starting download of {len(pdb_ids)} PDB files to {pdb_dir} using {n_jobs} workers...")
     counts = {"downloaded": 0, "exists": 0, "not_found": 0}
@@ -133,7 +131,7 @@ def prepare_pdb_directory(
 Downloaded: {counts.get('downloaded', 0)}
 Already existed: {counts.get('exists', 0)}
 Not found (404/empty): {counts.get('not_found', 0)}
-Saved to: {os.path.abspath(pdb_dir)}
+Saved to: {pdb_dir.resolve()}
 ==============================
 """)
     return
