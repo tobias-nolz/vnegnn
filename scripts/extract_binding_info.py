@@ -88,40 +88,53 @@ def extract_protein_info(protein: Structure) -> ProteinInfo:
     )
 
 
-def calculate_residue_depths(protein: Structure) -> Optional[dict]:
+def _calculate_depths_internal(protein: Structure) -> Optional[dict]:
+    """Internal function to calculate residue depths (called with timeout)."""
+    model = protein[0]
+    rd = ResidueDepth(model)
+
+    depth_map = {}
+    for chain in model:
+        for residue in chain:
+            res_id = residue.id[1]
+            chain_id = chain.id
+            key = (chain_id, res_id)
+
+            try:
+                depth_tuple = rd[chain_id, residue.id]
+                depth_map[key] = depth_tuple[0]
+            except KeyError:
+                depth_map[key] = np.nan
+
+    return depth_map
+
+
+def calculate_residue_depths(protein: Structure, timeout: int = 120) -> Optional[dict]:
     """
     Calculate residue depth for all residues in the protein structure.
 
     Returns a dictionary mapping (chain_id, residue_id) to residue depth,
-    or None if MSMS is not available or calculation fails.
+    or None if MSMS is not available, calculation fails, or times out.
+
+    Args:
+        protein: BioPython Structure object
+        timeout: Maximum time in seconds to wait for MSMS (default: 120)
     """
-    try:
-        model = protein[0]
-        rd = ResidueDepth(model)
+    import warnings
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
-        # Create a mapping of (chain_id, res_id) -> depth
-        depth_map = {}
-        for chain in model:
-            for residue in chain:
-                # residue.id is a tuple: (hetero_flag, res_id, insertion_code)
-                res_id = residue.id[1]
-                chain_id = chain.id
-                key = (chain_id, res_id)
-
-                try:
-                    # ResidueDepth returns (residue_depth, ca_depth)
-                    depth_tuple = rd[chain_id, residue.id]
-                    depth_map[key] = depth_tuple[0]  # Use residue depth
-                except KeyError:
-                    # Some residues might not have depth calculated
-                    depth_map[key] = np.nan
-
-        return depth_map
-    except Exception as e:
-        # MSMS might not be installed or other errors
-        click.echo(f"Warning: Could not calculate residue depths: {str(e)}")
-        click.echo("Make sure MSMS is installed and in your PATH")
-        return None
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(_calculate_depths_internal, protein)
+                return future.result(timeout=timeout)
+        except FuturesTimeoutError:
+            # MSMS took too long
+            return None
+        except Exception:
+            # MSMS might not be installed or other errors
+            return None
 
 
 def extract_binding_site(
@@ -181,7 +194,7 @@ def _is_valid_binding_file(binding_path: Path) -> bool:
         return False
 
 
-def process_single_complex(complex_path: Path, threshold: float = 4) -> bool:
+def process_single_complex(complex_path: Path, threshold: float = 4, skip_depth: bool = False) -> bool:
     """Process a single protein-ligand complex and extract binding information."""
     try:
         protein_path = complex_path / "protein.pdb"
@@ -218,8 +231,11 @@ def process_single_complex(complex_path: Path, threshold: float = 4) -> bool:
             protein_info, ligand_infos, threshold
         )
 
-        # Calculate residue depths
-        depth_map = calculate_residue_depths(protein)
+        # Calculate residue depths (can be skipped if MSMS hangs)
+        if skip_depth:
+            depth_map = None
+        else:
+            depth_map = calculate_residue_depths(protein)
 
         # Extract only CA atoms as used in VN-EGNN as input.
         ca_atoms = protein_info.atom_names == "CA"
@@ -312,8 +328,13 @@ def process_single_complex(complex_path: Path, threshold: float = 4) -> bool:
     is_flag=True,
     help="Force regeneration of binding info even if it already exists",
 )
+@click.option(
+    "--skip-depth",
+    is_flag=True,
+    help="Skip residue depth calculation (MSMS can hang on some structures)",
+)
 def extract_binding_info(
-    path: Path, n_jobs: int, threshold: float, verbose: bool, backend: str, force: bool
+    path: Path, n_jobs: int, threshold: float, verbose: bool, backend: str, force: bool, skip_depth: bool
 ):
     """
     Extract binding information from protein-ligand complexes.
@@ -358,16 +379,18 @@ def extract_binding_info(
         return
 
     click.echo(f"Processing {len(complex_dirs)} complexes")
+    if skip_depth:
+        click.echo("Skipping residue depth calculation (--skip-depth)")
 
     if n_jobs == 1:
         results = []
         for complex_dir in tqdm(complex_dirs, desc="Processing complexes"):
-            result = process_single_complex(complex_dir, threshold)
+            result = process_single_complex(complex_dir, threshold, skip_depth)
             results.append(result)
     else:
         # Parallel processing
         results = Parallel(n_jobs=n_jobs, prefer=backend)(
-            delayed(process_single_complex)(complex_dir, threshold)
+            delayed(process_single_complex)(complex_dir, threshold, skip_depth)
             for complex_dir in tqdm(complex_dirs, desc="Processing complexes")
         )
 

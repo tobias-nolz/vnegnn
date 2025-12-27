@@ -59,13 +59,19 @@ def run_command(cmd, cwd=None):
     is_flag=True,
     help="Force regeneration of embeddings and binding info even if they already exist"
 )
+@click.option(
+    "--skip-depth",
+    is_flag=True,
+    help="Skip residue depth calculation (MSMS can hang on some structures)"
+)
 def main(
         data_dir: Path,
         jobs: int,
         device: Path,
         batch: int,
         threshold: float,
-        force: bool
+        force: bool,
+        skip_depth: bool
 ):
     data_root = data_dir / "raw"
     if not data_root.exists():
@@ -114,6 +120,8 @@ def main(
     ]
     if force:
         binding_cmd.append("--force")
+    if skip_depth:
+        binding_cmd.append("--skip-depth")
     run_command(binding_cmd)
 
 
