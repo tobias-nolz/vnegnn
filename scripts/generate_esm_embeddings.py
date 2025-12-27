@@ -105,6 +105,42 @@ def extract_sequences_batch(protein_names: list, base_path: Path) -> dict:
     return sequences, errors
 
 
+def _is_valid_embedding(embedding_path: Path, output_format: str) -> bool:
+    """
+    Check if an embedding file exists and is valid.
+
+    Args:
+        embedding_path: Path to the embedding file
+        output_format: Format of the embedding file ('npz' or 'hdf5')
+
+    Returns:
+        True if the embedding file is valid, False otherwise
+    """
+    if not embedding_path.exists():
+        return False
+
+    try:
+        if output_format == "npz":
+            with np.load(embedding_path) as data:
+                # Check for required keys
+                required_keys = ['residue_embeddings', 'sequence_embedding', 'sequence']
+                if not all(key in data.files for key in required_keys):
+                    return False
+                # Check embeddings have valid shape
+                if data['residue_embeddings'].shape[0] == 0:
+                    return False
+        elif output_format == "hdf5":
+            with h5py.File(embedding_path, 'r') as f:
+                required_keys = ['residue_embeddings', 'sequence_embedding', 'sequence']
+                if not all(key in f for key in required_keys):
+                    return False
+                if f['residue_embeddings'].shape[0] == 0:
+                    return False
+        return True
+    except Exception:
+        return False
+
+
 def generate_esm_embeddings_batch(
     protein_names: list,
     base_path: Path,
@@ -307,7 +343,6 @@ def generate_esm_embeddings_batch(
 )
 @click.option(
     "--monitor-memory",
-    "-m",
     is_flag=True,
     help="Monitor GPU memory usage",
 )
@@ -318,6 +353,12 @@ def generate_esm_embeddings_batch(
     type=click.Choice(["auto", "cpu", "cuda"]),
     help="Device to use for computation (default: auto)",
 )
+@click.option(
+    "--force",
+    "-f",
+    is_flag=True,
+    help="Force regeneration of embeddings even if they already exist",
+)
 def generate_embeddings(
     path: Path,
     model: str,
@@ -327,6 +368,7 @@ def generate_embeddings(
     verbose: bool,
     monitor_memory: bool,
     device: str,
+    force: bool,
 ) -> None:
     """
     Generate ESM embeddings for proteins in PDB format using batched processing.
@@ -407,6 +449,25 @@ def generate_embeddings(
         click.echo("No valid proteins found!")
         return
 
+    # Check for existing embeddings (skip unless --force)
+    skipped_proteins = []
+    if not force:
+        proteins_to_process = []
+        for protein_name in valid_proteins:
+            embedding_file = path / protein_name / f"embeddings.{output_format}"
+            if embedding_file.exists() and _is_valid_embedding(embedding_file, output_format):
+                skipped_proteins.append(protein_name)
+            else:
+                proteins_to_process.append(protein_name)
+        valid_proteins = proteins_to_process
+
+    if skipped_proteins:
+        click.echo(f"Skipping {len(skipped_proteins)} proteins with existing embeddings (use --force to regenerate)")
+
+    if not valid_proteins:
+        click.echo("All proteins already have embeddings. Nothing to do.")
+        return
+
     click.echo(f"Processing {len(valid_proteins)} proteins with PDB files")
 
     # Create batches of proteins
@@ -468,24 +529,25 @@ def generate_embeddings(
         click.echo(f"Error during processing: {e}")
         return
 
-    results = [all_results[name] for name in valid_proteins]
-    successful = [r for r in results if "Successfully" in r]
-    failed = [r for r in results if "Error" in r]
+    results = {name: all_results[name] for name in valid_proteins}
+    successful = [(name, r) for name, r in results.items() if "Successfully" in r]
+    failed = [(name, r) for name, r in results.items() if "Error" in r]
 
     click.echo("\n" + "=" * 50)
     click.echo("EMBEDDING GENERATION COMPLETE!")
     click.echo(f"Successful: {len(successful)}")
+    click.echo(f"Skipped (existing): {len(skipped_proteins)}")
     click.echo(f"Failed: {len(failed)}")
 
     if verbose and successful:
         click.echo("\nSuccessful generations:")
-        for success in successful:
-            click.echo(f"  ✓ {success}")
+        for name, msg in successful:
+            click.echo(f"  ✓ {msg}")
 
     if failed:
         click.echo("\nFailed generations:")
-        for failure in failed:
-            click.echo(f"  ✗ {failure}")
+        for name, msg in failed:
+            click.echo(f"  ✗ {name}: {msg}")
 
     if failed:
         click.echo(f"\nWarning: {len(failed)} embedding generations failed!")

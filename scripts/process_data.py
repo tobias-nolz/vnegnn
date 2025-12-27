@@ -54,12 +54,19 @@ def run_command(cmd, cwd=None):
     type=float,
     help="Distance threshold for binding site detection"
 )
+@click.option(
+    "--force",
+    "-f",
+    is_flag=True,
+    help="Force regeneration of embeddings and binding info even if they already exist"
+)
 def main(
         data_dir: Path,
         jobs: int,
         device: Path,
         batch: int,
-        threshold: float
+        threshold: float,
+        force: bool
 ):
     data_root = data_dir / "raw"
     if not data_root.exists():
@@ -85,24 +92,30 @@ def main(
 
     print("Generating ESM embeddings...")
     esm_jobs = jobs if resolved_device != "cuda" else 1
-    run_command([
+    esm_cmd = [
         sys.executable,
         str(gen_script),
         "-p", str(data_root),
         "-j", str(esm_jobs),
         "-d", resolved_device,
         "-b", str(batch)
-    ])
+    ]
+    if force:
+        esm_cmd.append("--force")
+    run_command(esm_cmd)
 
     print("Extracting binding info...")
-    run_command([
+    binding_cmd = [
         sys.executable,
         str(extract_binding_info_script),
         "-p", str(data_root),
         "-j", str(jobs),
         "-t", str(threshold),
-        "-b", "processes"
-    ])
+        "-b", "processes",
+    ]
+    if force:
+        binding_cmd.append("--force")
+    run_command(binding_cmd)
 
 
 if __name__ == '__main__':

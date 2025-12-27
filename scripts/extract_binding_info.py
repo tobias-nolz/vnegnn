@@ -151,6 +151,36 @@ def extract_binding_site(
     )
 
 
+def _is_valid_binding_file(binding_path: Path) -> bool:
+    """
+    Check if a binding.npz file exists and is valid.
+
+    Args:
+        binding_path: Path to the binding.npz file
+
+    Returns:
+        True if the binding file is valid, False otherwise
+    """
+    if not binding_path.exists():
+        return False
+
+    try:
+        with np.load(binding_path) as data:
+            # Check for required keys
+            required_keys = [
+                'binding_residues', 'binding_site_centers', 'res_coords',
+                'res_names', 'ligand_coords', 'ligand_ids'
+            ]
+            if not all(key in data.files for key in required_keys):
+                return False
+            # Check data has valid shape (non-empty)
+            if data['res_coords'].shape[0] == 0:
+                return False
+        return True
+    except Exception:
+        return False
+
+
 def process_single_complex(complex_path: Path, threshold: float = 4) -> bool:
     """Process a single protein-ligand complex and extract binding information."""
     try:
@@ -276,8 +306,14 @@ def process_single_complex(complex_path: Path, threshold: float = 4) -> bool:
     type=click.Choice(["threads", "processes"]),
     help="Backend to use for parallel processing",
 )
+@click.option(
+    "--force",
+    "-f",
+    is_flag=True,
+    help="Force regeneration of binding info even if it already exists",
+)
 def extract_binding_info(
-    path: Path, n_jobs: int, threshold: float, verbose: bool, backend: str
+    path: Path, n_jobs: int, threshold: float, verbose: bool, backend: str, force: bool
 ):
     """
     Extract binding information from protein-ligand complexes.
@@ -302,6 +338,27 @@ def extract_binding_info(
     if verbose:
         click.echo(f"Found {len(complex_dirs)} complex directories")
 
+    # Check for existing binding.npz files (skip unless --force)
+    skipped_dirs = []
+    if not force:
+        dirs_to_process = []
+        for complex_dir in complex_dirs:
+            binding_file = complex_dir / "binding.npz"
+            if binding_file.exists() and _is_valid_binding_file(binding_file):
+                skipped_dirs.append(complex_dir)
+            else:
+                dirs_to_process.append(complex_dir)
+        complex_dirs = dirs_to_process
+
+    if skipped_dirs:
+        click.echo(f"Skipping {len(skipped_dirs)} complexes with existing binding.npz (use --force to regenerate)")
+
+    if not complex_dirs:
+        click.echo("All complexes already have binding info. Nothing to do.")
+        return
+
+    click.echo(f"Processing {len(complex_dirs)} complexes")
+
     if n_jobs == 1:
         results = []
         for complex_dir in tqdm(complex_dirs, desc="Processing complexes"):
@@ -319,6 +376,8 @@ def extract_binding_info(
     click.echo(
         f"\nProcessing complete: {successful}/{total} complexes processed successfully"
     )
+    if skipped_dirs:
+        click.echo(f"Skipped (existing): {len(skipped_dirs)}")
 
 
 if __name__ == "__main__":

@@ -109,7 +109,8 @@ python scripts/process_data.py \
 --jobs <num_parallel_workers> \
 --device <cuda_or_cpu> \
 --batch <batch_size> \
---threshold <distance_threshold>
+--threshold <distance_threshold> \
+[--force]
 ```
 
 | Argument      | Short | Type    | Required | Default                            | Description                                                           |
@@ -119,6 +120,7 @@ python scripts/process_data.py \
 | `--device`    | `-d`  | `str`   | ❌ No     | `"auto"`                           | Device to use for ESM embedding generation (`auto`, `cpu`, or `cuda`) |
 | `--batch`     | `-b`  | `int`   | ❌ No     | `1`                                | Batch size for ESM embedding generation                               |
 | `--threshold` | `-t`  | `float` | ❌ No     | `4.0`                              | Distance threshold for binding site detection                         |
+| `--force`     | `-f`  | `flag`  | ❌ No     | `False`                            | Force regeneration even if output files already exist                 |
 
 Without parameters, the script will process the data for the allosteric site prediction. For the other datasets, you
 need to specify the data directory.
