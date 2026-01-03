@@ -103,7 +103,8 @@ def setup_data(
             'ligand_residue': asd_dataset['modulator_resi'],
         }
     )
-    tqdm.write(f"[INFO] Extracting ligands (force_ligand_extraction={force_ligand_extraction}, max_diff={max_diff}, workers={n_jobs})")
+    tqdm.write(f"[INFO] Extracting ligands "
+               f"(force_ligand_extraction={force_ligand_extraction}, max_diff={max_diff}, workers={n_jobs})")
     prepare_ligands_from_asd(
         pdb_dir=output_dir,
         ligand_info=ligand_info,
@@ -152,8 +153,8 @@ def setup_splits(
     folder names under raw_dir/ that contain:
       - protein.pdb (protein structure)
       - ligand_*.pdb (extracted ligands)
-      - binding.npz (after process_data.py)
-      - embeddings.npz (after process_data.py)
+    If either of these files are missing for a PDB ID or the PDB ID is excluded,
+    it will not be included in the test_ids_allosteric file.
 
     These PDB IDs are used by AllostericDataModule to load test data.
 
@@ -175,6 +176,28 @@ def setup_splits(
     None
     """
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Get all valid PDB IDs in raw_dir
+    valid_pdb_ids = set()
+    invalid_pdb_ids = set()
+    for pdb_dir in raw_dir.iterdir():
+        if not pdb_dir.is_dir():
+            continue
+        pdb_id = pdb_dir.name.upper()
+        protein_file = pdb_dir / "protein.pdb"
+        ligand_files = list(pdb_dir.glob("ligand_*.pdb"))
+        if protein_file.exists() and ligand_files:
+            valid_pdb_ids.add(pdb_id)
+        else:
+            invalid_pdb_ids.add(pdb_id)
+
+    tqdm.write(f"[INFO] Found {len(valid_pdb_ids)} valid PDB IDs in {raw_dir}")
+    if invalid_pdb_ids:
+        with open(output_dir / "invalid_ids", "w") as f:
+            for pdb_id in invalid_pdb_ids:
+                f.write(f"{pdb_id}\n")
+        tqdm.write(f"[WARNING] Written {len(invalid_pdb_ids)} invalid PDB IDs (missing required files) "
+                   f"to {output_dir / 'invalid_ids'}")
 
     # Load IDs from all exclusion files
     pdbs_to_exclude = set()
@@ -201,13 +224,10 @@ def setup_splits(
 
         tqdm.write(f"[INFO] Total unique PDB IDs to exclude: {len(pdbs_to_exclude)}")
 
-    # Get all available PDBs in raw_dir
-    all_pdbs = [pdb_dir.name.upper() for pdb_dir in raw_dir.iterdir() if pdb_dir.is_dir()]
-
     # Filter out PDBs to exclude
     if pdbs_to_exclude:
-        filtered_pdbs = [pdb for pdb in all_pdbs if pdb not in pdbs_to_exclude]
-        excluded_pdbs = set(all_pdbs) - set(filtered_pdbs)
+        filtered_pdbs = [pdb for pdb in valid_pdb_ids if pdb not in pdbs_to_exclude]
+        excluded_pdbs = set(valid_pdb_ids) - set(filtered_pdbs)
         excluded_count = len(excluded_pdbs)
 
         with open(output_dir / "excluded_ids_allosteric", "w") as f:
@@ -217,7 +237,7 @@ def setup_splits(
         tqdm.write(f"[INFO] Written {excluded_count} excluded PDB IDs to {output_dir / 'excluded_ids_allosteric'}")
         test_pdbs = filtered_pdbs
     else:
-        test_pdbs = all_pdbs
+        test_pdbs = valid_pdb_ids
 
     with open(output_dir / "test_ids_allosteric", "w") as f:
         for pdb_id in test_pdbs:
@@ -281,10 +301,10 @@ def setup_splits(
     type=click.Path(),
     multiple=True,
     help=(
-        "Path to file(s) containing PDB IDs to exclude from test set (one per line). "
-        "Can be specified multiple times to exclude both training and validation IDs. "
-        "Supports sc-pdb format (e.g., '1abc_1') and simple format (e.g., '1abc'). "
-        "Use this to prevent data leakage when evaluating on allosteric sites."
+            "Path to file(s) containing PDB IDs to exclude from test set (one per line). "
+            "Can be specified multiple times to exclude both training and validation IDs. "
+            "Supports sc-pdb format (e.g., '1abc_1') and simple format (e.g., '1abc'). "
+            "Use this to prevent data leakage when evaluating on allosteric sites."
     )
 )
 def main(
