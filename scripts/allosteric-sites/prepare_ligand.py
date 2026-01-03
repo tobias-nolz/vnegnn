@@ -208,29 +208,54 @@ def diagnose_ligand_extraction(
     if missing_chains:
         return f"Chain(s) {missing_chains} not found. Available: {sorted(available_chains)}"
 
-    # Check available residues in the chains
-    available_residues = {}
+    # Check available HETATM residues (ligands) in the chains
+    hetatm_residues = {}
+    all_residues = {}
     for model in structure:
         for chain_id in chain_ids:
             if chain_id in [c.id for c in model]:
                 chain = model[chain_id]
-                available_residues[chain_id] = set()
+                hetatm_residues[chain_id] = set()
+                all_residues[chain_id] = set()
                 for residue in chain:
-                    available_residues[chain_id].add(residue.id[1])
+                    res_id = residue.id[1]
+                    hetflag = residue.id[0]
+                    all_residues[chain_id].add(res_id)
+                    # HETATM residues have non-empty hetflag
+                    if hetflag.strip():
+                        hetatm_residues[chain_id].add(res_id)
 
-    # Check if residue exists in any of the chains
-    found_in_chains = [c for c in chain_ids if residue_id in available_residues.get(c, set())]
-    if not found_in_chains:
-        # Find closest residue across all chains
-        all_residues = set()
-        for res_set in available_residues.values():
-            all_residues.update(res_set)
-        closest = min(all_residues, key=lambda x: abs(x - residue_id), default=None)
-        if closest is not None and abs(closest - residue_id) > 0:
-            return f"Residue {residue_id} not found in chains {chain_ids}. Closest: {closest} (diff {abs(closest - residue_id)})."
-        else:
-            return f"Residue {residue_id} not found in chains {chain_ids}. Available residues: {sorted(all_residues)}"
-    return "Unknown issue - residue found but extraction failed"
+    # Check if the exact residue exists as HETATM
+    found_hetatm = [c for c in chain_ids if residue_id in hetatm_residues.get(c, set())]
+    if found_hetatm:
+        return "Unknown issue - HETATM residue found but extraction failed"
+
+    # Check if the exact residue exists at all (as standard residue)
+    found_any = [c for c in chain_ids if residue_id in all_residues.get(c, set())]
+    if found_any:
+        return f"Residue {residue_id} exists in chains {found_any} but is not a HETATM (ligand)"
+
+    # Find closest HETATM residue across all chains
+    all_hetatm = set()
+    for res_set in hetatm_residues.values():
+        all_hetatm.update(res_set)
+
+    # Find closest standard residue across all chains
+    all_std = set()
+    for res_set in all_residues.values():
+        all_std.update(res_set)
+
+    closest_hetatm = min(all_hetatm, key=lambda x: abs(x - residue_id), default=None) if all_hetatm else None
+    closest_any = min(all_std, key=lambda x: abs(x - residue_id), default=None) if all_std else None
+
+    if closest_hetatm is not None:
+        diff = abs(closest_hetatm - residue_id)
+        return f"Residue {residue_id} not found in chains {chain_ids}. Closest HETATM: {closest_hetatm} (diff={diff})"
+    elif closest_any is not None:
+        diff = abs(closest_any - residue_id)
+        return f"Residue {residue_id} not found in chains {chain_ids}. No HETATM residues nearby. Closest residue: {closest_any} (diff={diff})"
+    else:
+        return f"Residue {residue_id} not found in chains {chain_ids}. No residues found."
 
 
 def extract_single_ligand(
@@ -336,7 +361,7 @@ def extract_single_ligand(
                     io.save(str(ligand_out_file), LigandSelect(chain_ids, closest))
                     if _is_valid_ligand_pdb(ligand_out_file):
                         results.append(("extracted", ligand_out_file,
-                                       f"Fuzzy matched: {residue_id} -> {closest}"))
+                                        f"Fuzzy matched: {residue_id} -> {closest}"))
                         continue
 
                 # Fuzzy match failed - diagnose and report
