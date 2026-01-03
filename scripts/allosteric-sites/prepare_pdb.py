@@ -15,8 +15,16 @@ def normalize_pdb_tokens(pbd_id: str) -> list[str]:
     - Single ID: "1ABC"
     - Multiple IDs: "1ABC; 2DEF"
     - IDs with chain: "1ABC_A"
-    :param: PDB_ID to normalize
-    :return: normalized PDB IDs
+
+    Parameters
+    ----------
+    pbd_id : str
+        Raw PDB ID string.
+
+    Returns
+    -------
+    list[str]
+        List of normalized PDB IDs (uppercase, 4-char).
     """
     s = pbd_id.strip()
 
@@ -42,13 +50,24 @@ def download_single(
     """
     Download a single PDB ID and save to out_dir.
     If the file already exists, skip download.
-    :param pdb_id: PDB ID to download
-    :param out_dir: Directory to save PDB files
-    :param max_retries: Maximum number of retries on failure
-    :param timeout: Request timeout in seconds
-    :return: Tuple of (pdb_id, status, file_path or None)
-        status: "downloaded", "exists", "not_found"
-        file_path: path to saved file or None if not downloaded
+
+    Parameters
+    ----------
+    pdb_id : str
+        PDB ID to download.
+    out_dir : Path
+        Directory to save the PDB file.
+    max_retries : int
+        Maximum number of download attempts.
+    timeout : int
+        Timeout for each download attempt in seconds.
+
+    Returns
+    -------
+    tuple[str, str, str | None]
+        (pdb_id, status, file_path)
+        status: "downloaded", "exists", or "not_found"
+        file_path: path to the downloaded file or None if not found
     """
     pdb_id_up = pdb_id.upper()
     out_dir = os.path.join(out_dir, f"{pdb_id_up}")
@@ -87,12 +106,23 @@ def prepare_pdb_directory(
     """
     Prepare a directory with PDB files for the given PDB IDs.
     Downloads files in parallel using multiple threads.
-    :param pdb_dir: Directory to save PDB files
-    :param pdb_ids: List of raw PDB ID strings (may contain multiple IDs per entry)
-    :param clear_existing: If True, clear existing PDB files in the directory before downloading
-    :param n_jobs: Number of parallel download threads
-    :param print_summary: If True, print a summary of download results
-    :return: None
+
+    Parameters
+    ----------
+    pdb_dir : Path
+        Directory to save PDB files.
+    pdb_ids : list[str]
+        List of raw PDB ID strings.
+    clear_existing : bool
+        If True, clear existing PDB files in the directory before downloading.
+    n_jobs : int
+        Number of parallel download threads.
+    print_summary : bool
+        If True, print a summary of the download results.
+
+    Returns
+    -------
+    None
     """
     pdb_ids = sorted({pid for raw in pdb_ids if raw for pid in normalize_pdb_tokens(raw)})
     pdb_dir.mkdir(parents=True, exist_ok=True)

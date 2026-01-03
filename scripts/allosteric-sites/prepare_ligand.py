@@ -14,7 +14,16 @@ def parse_chain_ids(chain_str: str) -> list[str]:
     """
     Parse chain ID string which may contain multiple chains.
     Handles formats like: "A", "A,B", "A, B", "A;B", etc.
-    Returns a list of individual chain IDs.
+
+    Parameters
+    ----------
+    chain_str : str
+        The chain ID string to parse.
+
+    Returns
+    -------
+    list[str]
+        A list of chain IDs.
     """
     if not chain_str or pd.isna(chain_str):
         return []
@@ -25,7 +34,7 @@ def parse_chain_ids(chain_str: str) -> list[str]:
     return [c.strip() for c in chains if c.strip()]
 
 
-def parse_residue_id(residue_str: str) -> tuple[list[int], str]:
+def parse_residue_id(residue_str: str) -> tuple[list[int], str | None]:
     """
     Parse residue ID string which may contain various formats.
 
@@ -35,8 +44,15 @@ def parse_residue_id(residue_str: str) -> tuple[list[int], str]:
     - Multiple slash: "1585/1586" -> ([1585, 1586], None)
     - Range: "1-141" -> ([], "range format - peptide ligand")
 
-    Returns:
-        tuple: (list of residue IDs, error message or None)
+    Parameters
+    ----------
+    residue_str : str
+        The residue ID string to parse.
+
+    Returns
+    -------
+    tuple[list[int], str | None]
+        A tuple containing a list of residue IDs and an optional error message.
     """
     if not residue_str or pd.isna(residue_str):
         return [], "Empty residue ID"
@@ -80,7 +96,20 @@ class LigandSelect(Select):
         self.chain_ids = set(chain_ids)
         self.residue_id = residue_id
 
-    def accept_residue(self, residue):
+    def accept_residue(self, residue) -> bool:
+        """
+        Accept only the specified residue in the specified chains.
+
+        Parameters
+        ----------
+        residue : Bio.PDB.Residue.Residue
+            The residue to check.
+
+        Returns
+        -------
+        bool
+            True if the residue matches the criteria, False otherwise.
+        """
         try:
             return (residue.get_parent().id in self.chain_ids and
                     residue.id[1] == self.residue_id)
@@ -88,19 +117,31 @@ class LigandSelect(Select):
             return False
 
 
-def find_closest_residue(pdb_file: Path, chain_ids: list[str], target_residue: int, max_diff: int = 2) -> int | None:
+def find_closest_residue(
+        pdb_file: Path,
+        chain_ids: list[str],
+        target_residue: int,
+        max_diff: int = 2
+) -> int | None:
     """
     Find the closest matching residue ID within max_diff of the target.
     Only returns a match if it's a HETATM residue (ligand).
 
-    Args:
-        pdb_file: Path to the PDB file
-        chain_ids: List of chain IDs to search in
-        target_residue: Target residue ID
-        max_diff: Maximum allowed difference (default: 2)
+    Parameters
+    ----------
+    pdb_file : Path
+        Path to the PDB file.
+    chain_ids : list[str]
+        List of chain IDs to search within.
+    target_residue : int
+        The target residue ID to match.
+    max_diff : int
+        Maximum allowed difference from the target residue ID.
 
-    Returns:
-        Matching residue ID or None if no close match found
+    Returns
+    -------
+    int | None
+        The closest matching residue ID, or None if no match found.
     """
     parser = PDBParser(QUIET=True, PERMISSIVE=True)
     try:
@@ -128,10 +169,27 @@ def find_closest_residue(pdb_file: Path, chain_ids: list[str], target_residue: i
     return min(candidates, key=lambda x: abs(x - target_residue))
 
 
-def diagnose_ligand_extraction(pdb_file: Path, chain_ids: list[str], residue_id: int) -> str:
+def diagnose_ligand_extraction(
+        pdb_file: Path,
+        chain_ids: list[str],
+        residue_id: int
+) -> str:
     """
     Diagnose why a ligand extraction might have failed.
-    Returns a diagnostic message.
+
+    Parameters
+    ----------
+    pdb_file : Path
+        Path to the PDB file.
+    chain_ids : list[str]
+        List of chain IDs to check.
+    residue_id : int
+        The residue ID that was attempted to be extracted.
+
+    Returns
+    -------
+    str
+        Diagnostic message explaining the failure reason.
     """
     parser = PDBParser(QUIET=True, PERMISSIVE=True)
     try:
@@ -192,13 +250,25 @@ def extract_single_ligand(
     3. Same ligand across multiple chains (comma-separated): chain_ids="A,B", residue_ids="501"
     4. Multiple residues (comma or slash): residue_ids="401,402" or "1585/1586"
 
-    :param pdb_dir: Directory containing the PDB files
-    :param pdb_id: PDB ID of the protein
-    :param chain_ids_str: Chain IDs - semicolon separates different ligands, comma separates chains for same ligand
-    :param residue_ids_str: Residue IDs - semicolon separates different ligands
-    :param force_ligand_extraction: If True, re-extract even if ligand file exists
-    :param max_diff: Maximum residue ID difference for fuzzy matching (0 = exact match only, 2 = allow ±2)
-    :return: List of tuples[status, ligand_out_file, diagnostic_message]
+    Parameters
+    ----------
+    pdb_dir : Path
+        Directory containing PDB files organized by PDB ID.
+    pdb_id : str
+        The PDB ID of the protein.
+    chain_ids_str : str
+        Chain ID(s) string from the dataset.
+    residue_ids_str : str
+        Residue ID(s) string from the dataset.
+    force_ligand_extraction : bool
+        If True, re-extract ligands even if they already exist.
+    max_diff : int
+        Maximum residue ID difference for fuzzy matching (0 = exact match only).
+
+    Returns
+    -------
+    list[tuple[str, Path, str]]
+        A list of tuples with extraction status, output file path, and diagnostic message.
     """
     protein_dir = pdb_dir / f"{pdb_id}"
     pdb_file = protein_dir / "protein.pdb"
@@ -288,6 +358,16 @@ def _is_valid_ligand_pdb(pdb_file: Path) -> bool:
     """
     Check if a PDB file contains valid atom records.
     A valid ligand PDB should have at least one ATOM or HETATM record.
+
+    Parameters
+    ----------
+    pdb_file : Path
+        Path to the PDB file to check.
+
+    Returns
+    -------
+    bool
+        True if the PDB file contains ATOM or HETATM records, False otherwise.
     """
     if not pdb_file.exists():
         return False
@@ -313,14 +393,27 @@ def prepare_ligands_from_asd(
 ) -> None:
     """
     Save ligand structures from ASD dataset PDB files.
-    :param pdb_dir: Directory containing PDB files organized by PDB ID
-    :param ligand_info: DataFrame with columns ['pdb_id', 'ligand_chain', 'ligand_residue']
-    :param force_ligand_extraction: If True, re-extract ligands even if they already exist
-    :param max_diff: Maximum residue ID difference for fuzzy matching (0 = exact match only)
-    :param workers: Number of parallel workers for extraction
-    :param print_summary: If True, print a summary of extraction results
-    :param verbose: If True, print detailed diagnostic messages for failed extractions
-    :return: None
+
+    Parameters
+    ----------
+    pdb_dir : Path
+        Directory containing PDB files organized by PDB ID.
+    ligand_info : pd.DataFrame
+        DataFrame with columns: 'pdb_id', 'ligand_chain', 'ligand_residue'.
+    force_ligand_extraction : bool
+        If True, re-extract ligands even if they already exist.
+    max_diff : int
+        Maximum residue ID difference for fuzzy matching (0 = exact match only).
+    workers : int
+        Number of parallel worker threads to use.
+    print_summary : bool
+        If True, print a summary of the extraction results.
+    verbose : bool
+        If True, print detailed warnings for failed extractions.
+
+    Returns
+    -------
+    None
     """
     tqdm.write("[INFO] Preparing ligands from ASD dataset...")
     counts = {"extracted": 0, "skipped": 0, "missing": 0, "empty": 0, "errors": 0}

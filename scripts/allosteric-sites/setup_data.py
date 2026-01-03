@@ -28,15 +28,33 @@ def setup_data(
       - download PDB files into `pdb_dir` (one folder per PDB with `protein.pdb` inside)
       - extract ligand PDBs from the downloaded protein files
 
-    :param output_dir: Path to the directory where PDB files will be stored.
-    :param asd_dataset: DataFrame containing ASD dataset information.
-    :param n_jobs: Number of parallel workers for downloads/extraction.
-    :param force_ligand_extraction: If True, re-extract ligands even if they already exist.
-    :param clear_existing_pdb: If True, clear existing PDB files before downloading.
-    :param max_diff: Maximum residue ID difference for fuzzy matching (0 = exact match only).
-    :param verbose: If True, enable verbose output.
-    :return: None
-    :raises ValueError: If the ASD dataset is empty or missing required columns.
+    Parameters
+    ----------
+    output_dir : Path
+        Directory where PDB folders will be stored (one folder per PDB)
+    asd_dataset : pd.DataFrame
+        ASD dataset containing columns 'allosteric_pdb', 'modulator_chain', 'modulator_resi'
+    n_jobs : int
+        Number of parallel workers
+    force_ligand_extraction : bool
+        If True, force re-extraction of ligand files even if they already exist
+    clear_existing_pdb : bool
+        If True, clear existing PDB files before downloading new ones
+    max_diff : int
+        Maximum residue ID difference for fuzzy matching (0 = exact match only, 2 = allow ±2)
+    verbose : bool
+        If True, enable verbose output
+
+    Returns
+    -------
+    None
+
+    Raises
+    ------
+    ValueError
+        If the ASD dataset is empty or no valid entries remain after filtering missing values
+    KeyError
+        If required columns are missing from the ASD dataset
     """
     output_dir = Path(output_dir)
 
@@ -98,6 +116,24 @@ def setup_data(
 
 
 def _read_asd_dataset(path: Path) -> pd.DataFrame:
+    """
+    Read the ASD dataset from a CSV/TSV file.
+
+    Parameters
+    ----------
+    path : Path
+        Path to the ASD dataset file.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame containing the ASD dataset.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the specified file does not exist.
+    """
     path = Path(path)
     if not path.exists():
         raise FileNotFoundError(f"ASD dataset file not found: {path}")
@@ -111,9 +147,17 @@ def setup_splits(
     """
     Setup up data splits as all test data.
     TODO: Setup dataset splits given training protein data.
-    :param output_dir: Directory where split files will be stored
-    :param raw_dir: Directory containing raw PDB data
-    :return: None
+
+    Parameters
+    ----------
+    output_dir : Path
+        Directory where split files will be stored.
+    raw_dir : Path
+        Directory containing raw PDB folders.
+
+    Returns
+    -------
+    None
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -183,6 +227,30 @@ def main(
         max_diff: int,
         verbose: bool
 ):
+    """
+    Main function to setup data for VN-EGNN allosteric site prediction.
+
+    Parameters
+    ----------
+    output_dir : Path
+        Directory where PDB folders will be stored (one folder per PDB)
+    asd_file : Path
+        Path to ASD dataset file (CSV/TSV)
+    jobs : int
+        Number of parallel workers
+    force_ligand_extraction : bool
+        If True, force re-extraction of ligand files even if they already exist
+    clear_existing_pdb : bool
+        If True, clear existing PDB files before downloading new ones
+    max_diff : int
+        Maximum residue ID difference for fuzzy matching (0 = exact match only, 2 = allow ±2)
+    verbose : bool
+        If True, enable verbose output
+
+    Returns
+    -------
+    None
+    """
     print(f"Loading ASD dataset from: {asd_file}")
     asd_df = _read_asd_dataset(asd_file)
 
