@@ -143,10 +143,19 @@ def _read_asd_dataset(path: Path) -> pd.DataFrame:
 def setup_splits(
         output_dir: Path,
         raw_dir: Path,
+        exclude_ids_files: list[Path] = None,
 ):
     """
-    Setup up data splits as all test data.
-    TODO: Setup dataset splits given training protein data.
+    Setup up data splits as all test data, optionally filtering out training/validation PDBs.
+
+    The test_ids_allosteric file contains one PDB ID per line, corresponding to
+    folder names under raw_dir/ that contain:
+      - protein.pdb (protein structure)
+      - ligand_*.pdb (extracted ligands)
+      - binding.npz (after process_data.py)
+      - embeddings.npz (after process_data.py)
+
+    These PDB IDs are used by AllostericDataModule to load test data.
 
     Parameters
     ----------
@@ -154,6 +163,12 @@ def setup_splits(
         Directory where split files will be stored.
     raw_dir : Path
         Directory containing raw PDB folders.
+    exclude_ids_files : list[Path], optional
+        List of paths to files containing PDB IDs to exclude (one per line).
+        Use this to exclude both training and validation IDs to prevent data leakage.
+        Supports both formats:
+          - Simple PDB IDs: "1ABC" or "1abc"
+          - sc-pdb format: "1abc_1" (extracts "1ABC")
 
     Returns
     -------
@@ -161,11 +176,53 @@ def setup_splits(
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    all_pdbs = [pdb_dir.name for pdb_dir in raw_dir.iterdir() if pdb_dir.is_dir()]
+    # Load IDs from all exclusion files
+    pdbs_to_exclude = set()
+    if exclude_ids_files:
+        for ids_file in exclude_ids_files:
+            if ids_file is None:
+                continue
+            ids_file = Path(ids_file)
+            if ids_file.exists():
+                count_before = len(pdbs_to_exclude)
+                with open(ids_file, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        # Handle sc-pdb format (e.g., "1abc_1" -> "1ABC")
+                        # and simple format (e.g., "1abc" -> "1ABC")
+                        pdb_id = line.split('_')[0].upper()
+                        pdbs_to_exclude.add(pdb_id)
+                count_added = len(pdbs_to_exclude) - count_before
+                tqdm.write(f"[INFO] Loaded {count_added} unique PDB IDs from {ids_file.name}")
+            else:
+                tqdm.write(f"[WARNING] Exclusion file not found: {ids_file}")
+
+        tqdm.write(f"[INFO] Total unique PDB IDs to exclude: {len(pdbs_to_exclude)}")
+
+    # Get all available PDBs in raw_dir
+    all_pdbs = [pdb_dir.name.upper() for pdb_dir in raw_dir.iterdir() if pdb_dir.is_dir()]
+
+    # Filter out PDBs to exclude
+    if pdbs_to_exclude:
+        filtered_pdbs = [pdb for pdb in all_pdbs if pdb not in pdbs_to_exclude]
+        excluded_pdbs = set(all_pdbs) - set(filtered_pdbs)
+        excluded_count = len(excluded_pdbs)
+
+        with open(output_dir / "excluded_ids_allosteric", "w") as f:
+            for pdb_id in excluded_pdbs:
+                f.write(f"{pdb_id}\n")
+
+        tqdm.write(f"[INFO] Written {excluded_count} excluded PDB IDs to {output_dir / 'excluded_ids_allosteric'}")
+        test_pdbs = filtered_pdbs
+    else:
+        test_pdbs = all_pdbs
 
     with open(output_dir / "test_ids_allosteric", "w") as f:
-        for pdb_id in all_pdbs:
+        for pdb_id in test_pdbs:
             f.write(f"{pdb_id}\n")
+    tqdm.write(f"[INFO] Written {len(test_pdbs)} test PDB IDs to {output_dir / 'test_ids_allosteric'}")
 
 
 @click.command()
@@ -218,6 +275,18 @@ def setup_splits(
     default=False,
     help="Enable verbose output"
 )
+@click.option(
+    "--exclude-ids",
+    "-e",
+    type=click.Path(),
+    multiple=True,
+    help=(
+        "Path to file(s) containing PDB IDs to exclude from test set (one per line). "
+        "Can be specified multiple times to exclude both training and validation IDs. "
+        "Supports sc-pdb format (e.g., '1abc_1') and simple format (e.g., '1abc'). "
+        "Use this to prevent data leakage when evaluating on allosteric sites."
+    )
+)
 def main(
         output_dir: Path,
         asd_file: Path,
@@ -225,7 +294,8 @@ def main(
         force_ligand_extraction: bool,
         clear_existing_pdb: bool,
         max_diff: int,
-        verbose: bool
+        verbose: bool,
+        exclude_ids: tuple
 ):
     """
     Main function to setup data for VN-EGNN allosteric site prediction.
@@ -246,6 +316,8 @@ def main(
         Maximum residue ID difference for fuzzy matching (0 = exact match only, 2 = allow ±2)
     verbose : bool
         If True, enable verbose output
+    exclude_ids : tuple
+        Tuple of paths to files containing PDB IDs to exclude from test set
 
     Returns
     -------
@@ -271,7 +343,8 @@ def main(
     split_dir = output_dir / 'splits'
     setup_splits(
         output_dir=split_dir,
-        raw_dir=raw_dir
+        raw_dir=raw_dir,
+        exclude_ids_files=list(exclude_ids) if exclude_ids else None
     )
 
 

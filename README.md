@@ -77,11 +77,13 @@ For more information on the Allosteric Database (ASD) dataset, please refer to t
    ```bash
     python scripts/allosteric-sites/setup_data.py \
    --asd-file path/to/ASD_Release_xxxx_AS.txt \
-    --output-dir path/to/store/pdb_files \
-    --jobs <num_parallel_workers> \
+    [--output-dir path/to/store/pdb_files] \
+    [--jobs <num_parallel_workers>] \
     [--force-ligand-extraction] \
     [--clear-existing-pdb] \
     [--max-diff <int>] \
+    [--exclude-ids path/to/train_ids] \
+    [--exclude-ids path/to/valid_ids] \
     [--verbose]
    ```
     
@@ -93,7 +95,23 @@ For more information on the Allosteric Database (ASD) dataset, please refer to t
     | `--force-ligand-extraction` | `-f`  | `flag` | ❌ No     | `False`                            | Force re-extraction of ligand files even if they already exist                                                  |
     | `--clear-existing-pdb`      | —     | `flag` | ❌ No     | `False`                            | Clear existing PDB files before downloading new ones                                                            |
     | `--max-diff`                | `-m`  | `int`  | ❌ No     | `0`                                | Maximum residue ID difference for fuzzy matching (0 = exact only, 2 = allow ±2)                                 |
+    | `--exclude-ids`             | `-e`  | `str`  | ❌ No     | `None`                             | Path to file(s) with PDB IDs to exclude (can be specified multiple times)                                       |
     | `--verbose`                 | `-v`  | `flag` | ❌ No     | `False`                            | Enable verbose logging                                                                                          |
+
+   **Preventing Data Leakage:** To ensure fair evaluation, use `--exclude-ids` to exclude PDBs used during training and validation:
+   ```bash
+   # If trained on sc-pdb (exclude both train and valid):
+   python scripts/allosteric-sites/setup_data.py \
+       --asd-file path/to/ASD_Release_xxxx_AS.txt \
+       --exclude-ids data/data/sc-pdb/splits/train_ids_scpdb \
+       --exclude-ids data/data/sc-pdb/splits/valid_ids_scpdb
+   
+   # If trained on pdbbind2020 (exclude both train and valid):
+   python scripts/allosteric-sites/setup_data.py \
+       --asd-file path/to/ASD_Release_xxxx_AS.txt \
+       --exclude-ids data/data/pdbbind2020/splits/train_ids_pdbbind2020 \
+       --exclude-ids data/data/pdbbind2020/splits/valid_ids_pdbbind2020
+   ```
 
 This will create a directory structure suitable for evaluation.
 
@@ -110,11 +128,11 @@ VN-EGNN repository to generate esm embeddings and extract the binding info.
 
 ```bash
 python scripts/process_data.py \
---data-dir path/to/stored/pdb_files \
---jobs <num_parallel_workers> \
---device <cuda_or_cpu> \
---batch <batch_size> \
---threshold <distance_threshold> \
+[--data-dir path/to/stored/pdb_files] \
+[--jobs <num_parallel_workers>] \
+[--device <cuda_or_cpu>] \
+[--batch <batch_size>] \
+[--threshold <distance_threshold>] \
 [--force]
 ```
 
