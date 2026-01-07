@@ -84,6 +84,7 @@ For more information on the Allosteric Database (ASD) dataset, please refer to t
     [--max-diff <int>] \
     [--exclude-ids path/to/train_ids] \
     [--exclude-ids path/to/valid_ids] \
+    [--only-lig] \
     [--verbose]
    ```
     
@@ -96,6 +97,7 @@ For more information on the Allosteric Database (ASD) dataset, please refer to t
     | `--clear-existing-pdb`      | —     | `flag` | ❌ No     | `False`                            | Clear existing PDB files before downloading new ones                                                            |
     | `--max-diff`                | `-m`  | `int`  | ❌ No     | `0`                                | Maximum residue ID difference for fuzzy matching (0 = exact only, 2 = allow ±2)                                 |
     | `--exclude-ids`             | `-e`  | `str`  | ❌ No     | `None`                             | Path to file(s) with PDB IDs to exclude (can be specified multiple times)                                       |
+    | `--only-lig`                | —     | `flag` | ❌ No     | `False`                            | Only use rows where `modulator_class='Lig'`                                                                     |
     | `--verbose`                 | `-v`  | `flag` | ❌ No     | `False`                            | Enable verbose logging                                                                                          |
 
    **Preventing Data Leakage:** To ensure fair evaluation, use `--exclude-ids` to exclude PDBs used during training and validation:

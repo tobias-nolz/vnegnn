@@ -3,13 +3,14 @@
 Setup data for VN-EGNN allosteric site prediction.
 This includes downloading PDB files and extracting ligand information.
 """
-import pandas as pd
 from pathlib import Path
 
-from prepare_pdb import prepare_pdb_directory
-from prepare_ligand import prepare_ligands_from_asd
-from tqdm import tqdm
 import click
+import pandas as pd
+from tqdm import tqdm
+
+from prepare_ligand import prepare_ligands_from_asd
+from prepare_pdb import prepare_pdb_directory
 
 
 def setup_data(
@@ -19,6 +20,7 @@ def setup_data(
         force_ligand_extraction: bool = False,
         clear_existing_pdb: bool = False,
         max_diff: int = 0,
+        only_lig: bool = True,
         verbose: bool = False
 ) -> None:
     """
@@ -42,6 +44,8 @@ def setup_data(
         If True, clear existing PDB files before downloading new ones
     max_diff : int
         Maximum residue ID difference for fuzzy matching (0 = exact match only, 2 = allow ±2)
+    only_lig : bool
+        If True, only process ligands (modulator_class == 'Lig')
     verbose : bool
         If True, enable verbose output
 
@@ -70,6 +74,8 @@ def setup_data(
     # Filter out rows with missing PDB IDs or ligand info
     initial_count = len(asd_dataset)
     mask = asd_dataset[['allosteric_pdb', 'modulator_chain', 'modulator_resi']].isna().any(axis=1)
+    if only_lig:
+        mask = mask | (asd_dataset.get('modulator_class') != 'Lig')
     filtered_rows = asd_dataset[mask]
     asd_dataset = asd_dataset[~mask]
     filtered_count = initial_count - len(asd_dataset)
@@ -307,6 +313,12 @@ def setup_splits(
             "Use this to prevent data leakage when evaluating on allosteric sites."
     )
 )
+@click.option(
+    "--only-lig",
+    is_flag=True,
+    default=False,
+    help="Only process ligands (modulator_class == 'Lig')"
+)
 def main(
         output_dir: Path,
         asd_file: Path,
@@ -315,7 +327,8 @@ def main(
         clear_existing_pdb: bool,
         max_diff: int,
         verbose: bool,
-        exclude_ids: tuple
+        exclude_ids: tuple,
+        only_lig: bool,
 ):
     """
     Main function to setup data for VN-EGNN allosteric site prediction.
@@ -338,6 +351,8 @@ def main(
         If True, enable verbose output
     exclude_ids : tuple
         Tuple of paths to files containing PDB IDs to exclude from test set
+    only_lig: bool
+        If True, only process ligands (modulator_class == 'Lig')
 
     Returns
     -------
@@ -357,7 +372,8 @@ def main(
         force_ligand_extraction=force_ligand_extraction,
         clear_existing_pdb=clear_existing_pdb,
         max_diff=max_diff,
-        verbose=verbose
+        verbose=verbose,
+        only_lig=only_lig
     )
 
     split_dir = output_dir / 'splits'
