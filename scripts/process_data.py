@@ -73,6 +73,7 @@ def main(
         force: bool,
         skip_depth: bool
 ):
+    data_dir = Path(data_dir).resolve()
     data_root = data_dir / "raw"
     if not data_root.exists():
         raise SystemExit(f"Data root not found: {data_root}")
