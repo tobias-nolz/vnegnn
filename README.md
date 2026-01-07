@@ -6,8 +6,8 @@
 
 The VN-EGNN model can be found on [GitHub](https://github.com/ml-jku/vnegnn).
 
-This branch is currently WIP. It is designed to evaluate the VN-EGNN model for allosteric site prediction on the ASD (
-Allosteric Database) dataset.
+This branch is currently WIP. It is designed to evaluate the VN-EGNN model for allosteric site prediction on the ASD (Allosteric Database) dataset. Further information on the dataset can be found
+[here](documentation/ASD_information.md). Additionally, the architecture and dataflow is outlined [here](documentation/architecture_and_dataflow.md).
 
 # Installation
 
@@ -65,7 +65,7 @@ In addition, you need perform the following steps, as also described in the orig
 
 # Data
 
-For more information on the Allosteric Database (ASD) dataset, please refer to the [ASD Infos](documentation/ASD_Infos.md) file.
+For more information on the Allosteric Database (ASD) dataset, please refer to the [ASD Infos](documentation/ASD_information.md) file.
 
 ## Setup Data
 
