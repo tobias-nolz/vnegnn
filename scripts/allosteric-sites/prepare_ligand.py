@@ -43,6 +43,9 @@ def parse_residue_id(residue_str: str) -> tuple[list[int], str | None]:
     - Multiple comma: "401,402" -> ([401, 402], None)
     - Multiple slash: "1585/1586" -> ([1585, 1586], None)
     - Range: "1-141" -> ([], "range format - peptide ligand")
+    - With insertion code: "301A" -> ([301], None) - insertion code stripped
+    - Chain:residue format: "A:509" -> ([509], None) - chain prefix stripped
+    - Space-separated: "182 183" -> ([182, 183], None)
 
     Parameters
     ----------
@@ -59,19 +62,31 @@ def parse_residue_id(residue_str: str) -> tuple[list[int], str | None]:
 
     residue_str = str(residue_str).strip()
 
+    # Normalize different semicolon variants (Chinese semicolon ；vs ASCII ;)
+    residue_str = residue_str.replace('；', ';')
+
+    # Check for "Chain_X" format which is invalid - the residue should be a number
+    if residue_str.startswith('Chain_'):
+        return [], f"Invalid residue ID format: {residue_str} (chain specification in residue field)"
+
     # Check for range format (e.g., "1-141") - these are peptide ligands, skip them
     if re.match(r'^\d+-\d+$', residue_str):
         return [], f"Range format '{residue_str}' indicates peptide ligand - skipping"
 
-    # Handle multiple residues separated by comma or slash
-    if ',' in residue_str or '/' in residue_str:
-        parts = re.split(r'[,/]+', residue_str)
+    # Handle multiple residues separated by comma, slash, semicolon or space
+    # Note: semicolons are handled at a higher level for separate ligand entries,
+    # but space-separated values within a single entry should be handled here
+    if ',' in residue_str or '/' in residue_str or ' ' in residue_str:
+        parts = re.split(r'[,/\s]+', residue_str)
         residue_ids = []
         for part in parts:
             part = part.strip()
-            try:
-                residue_ids.append(int(part))
-            except ValueError:
+            if not part:
+                continue
+            parsed_id = _parse_single_residue_id(part)
+            if parsed_id is not None:
+                residue_ids.append(parsed_id)
+            else:
                 return [], f"Invalid residue ID component: {part}"
         # Remove duplicates while preserving order
         seen = set()
@@ -83,10 +98,59 @@ def parse_residue_id(residue_str: str) -> tuple[list[int], str | None]:
         return unique_ids, None
 
     # Single residue ID
+    parsed_id = _parse_single_residue_id(residue_str)
+    if parsed_id is not None:
+        return [parsed_id], None
+    return [], f"Invalid residue ID: {residue_str}"
+
+
+def _parse_single_residue_id(residue_str: str) -> int | None:
+    """
+    Parse a single residue ID string, handling various formats.
+
+    Handles:
+    - Plain numbers: "501" -> 501
+    - With insertion codes: "301A" -> 301 (insertion code stripped)
+    - Chain:residue format: "A:509" -> 509
+    - Comma-separated thousands: "1,001" -> 1001
+
+    Parameters
+    ----------
+    residue_str : str
+        A single residue ID string.
+
+    Returns
+    -------
+    int | None
+        The parsed residue ID, or None if parsing fails.
+    """
+    residue_str = residue_str.strip()
+
+    # Handle chain:residue format (e.g., "A:509", "B:515")
+    if ':' in residue_str:
+        parts = residue_str.split(':')
+        if len(parts) == 2:
+            residue_str = parts[1].strip()
+
+    # Remove commas used as thousands separator (e.g., "1,001" -> "1001")
+    residue_str = residue_str.replace(',', '')
+
+    # Try direct integer conversion first
     try:
-        return [int(residue_str)], None
+        return int(residue_str)
     except ValueError:
-        return [], f"Invalid residue ID: {residue_str}"
+        pass
+
+    # Handle insertion codes (e.g., "301A" -> 301)
+    # Insertion codes are typically single letters at the end
+    match = re.match(r'^(-?\d+)[A-Za-z]?$', residue_str)
+    if match:
+        try:
+            return int(match.group(1))
+        except ValueError:
+            pass
+
+    return None
 
 
 def extract_ligand_with_conect(
@@ -365,9 +429,18 @@ def extract_single_ligand(
     chain_groups = str(chain_ids_str).split(";") if chain_ids_str else []
     residue_groups = str(residue_ids_str).split(";") if residue_ids_str else []
 
+    # Clean up empty entries from trailing semicolons
+    chain_groups = [c.strip() for c in chain_groups if c.strip()]
+    residue_groups = [r.strip() for r in residue_groups if r.strip()]
+
     # Handle case where there's only one residue group but multiple chain groups
     if len(residue_groups) == 1 and len(chain_groups) > 1:
         residue_groups = residue_groups * len(chain_groups)
+
+    # Handle case where there's only one chain but multiple residue groups
+    # This is common when multiple ligands are in the same chain (e.g., "A" with "901;902")
+    if len(chain_groups) == 1 and len(residue_groups) > 1:
+        chain_groups = chain_groups * len(residue_groups)
 
     if len(chain_groups) != len(residue_groups):
         return [("empty", protein_dir / "ligand_0.pdb",
