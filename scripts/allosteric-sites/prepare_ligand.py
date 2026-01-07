@@ -2,7 +2,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import re
 import pandas as pd
 from pathlib import Path
-from Bio.PDB import PDBParser, PDBIO, Select
+from Bio.PDB import PDBParser
 from Bio.PDB.PDBExceptions import PDBConstructionWarning
 from tqdm import tqdm
 import warnings
@@ -89,32 +89,92 @@ def parse_residue_id(residue_str: str) -> tuple[list[int], str | None]:
         return [], f"Invalid residue ID: {residue_str}"
 
 
-class LigandSelect(Select):
-    """Select residues matching any of the given chain IDs and residue ID."""
+def extract_ligand_with_conect(
+        pdb_file: Path,
+        chain_ids: list[str],
+        residue_id: int,
+        output_file: Path
+) -> bool:
+    """
+    Extract ligand HETATM records along with corresponding CONECT records.
 
-    def __init__(self, chain_ids: list[str], residue_id: int):
-        self.chain_ids = set(chain_ids)
-        self.residue_id = residue_id
+    This ensures proper bond connectivity is preserved for RDKit parsing.
 
-    def accept_residue(self, residue) -> bool:
-        """
-        Accept only the specified residue in the specified chains.
+    Parameters
+    ----------
+    pdb_file : Path
+        Path to the source PDB file.
+    chain_ids : list[str]
+        List of chain IDs to search within.
+    residue_id : int
+        The residue ID of the ligand to extract.
+    output_file : Path
+        Path to write the extracted ligand PDB.
 
-        Parameters
-        ----------
-        residue : Bio.PDB.Residue.Residue
-            The residue to check.
+    Returns
+    -------
+    bool
+        True if ligand was extracted successfully, False otherwise.
+    """
+    hetatm_lines = []
+    conect_lines = []
+    atom_serial_set = set()
 
-        Returns
-        -------
-        bool
-            True if the residue matches the criteria, False otherwise.
-        """
+    with open(pdb_file, 'r') as f:
+        for line in f:
+            if line.startswith('HETATM'):
+                # PDB format: columns 22 = chain ID, 23-26 = residue sequence number
+                chain = line[21].strip()
+                try:
+                    res_id = int(line[22:26].strip())
+                except ValueError:
+                    continue
+                if chain in chain_ids and res_id == residue_id:
+                    hetatm_lines.append(line)
+                    # Track atom serial numbers (columns 7-11)
+                    try:
+                        atom_serial_set.add(int(line[6:11].strip()))
+                    except ValueError:
+                        pass
+            elif line.startswith('CONECT'):
+                conect_lines.append(line)
+
+    if not hetatm_lines:
+        return False
+
+    # Filter CONECT lines to only include atoms in our ligand
+    filtered_conect = []
+    for line in conect_lines:
+        # CONECT format: CONECT serial1 serial2 serial3 ...
+        # Each serial is 5 characters starting at position 6
         try:
-            return (residue.get_parent().id in self.chain_ids and
-                    residue.id[1] == self.residue_id)
-        except (ValueError, TypeError):
-            return False
+            primary_serial = int(line[6:11].strip())
+            if primary_serial in atom_serial_set:
+                # Keep only connections to atoms also in our ligand
+                # Parse all connected atoms and filter
+                new_line = line[:11]  # Keep "CONECT" + primary serial
+                pos = 11
+                while pos + 5 <= len(line.rstrip()):
+                    try:
+                        connected_serial = int(line[pos:pos+5].strip())
+                        if connected_serial in atom_serial_set:
+                            new_line += f"{connected_serial:>5}"
+                    except ValueError:
+                        pass
+                    pos += 5
+                if len(new_line) > 11:  # Has at least one valid connection
+                    filtered_conect.append(new_line + '\n')
+        except (ValueError, IndexError):
+            continue
+
+    with open(output_file, 'w') as f:
+        for line in hetatm_lines:
+            f.write(line)
+        for line in filtered_conect:
+            f.write(line)
+        f.write('END\n')
+
+    return True
 
 
 def find_closest_residue(
@@ -344,22 +404,18 @@ def extract_single_ligand(
                     continue
                 ligand_out_file.unlink()
 
-            # Try to extract with exact residue ID
-            parser = PDBParser(QUIET=True, PERMISSIVE=True)
-            io = PDBIO()
-            structure = parser.get_structure(pdb_id, pdb_file)
-            io.set_structure(structure)
-            io.save(str(ligand_out_file), LigandSelect(chain_ids, residue_id))
+            # Try to extract with exact residue ID using CONECT-preserving extraction
+            extracted = extract_ligand_with_conect(pdb_file, chain_ids, residue_id, ligand_out_file)
 
-            if _is_valid_ligand_pdb(ligand_out_file):
+            if extracted and _is_valid_ligand_pdb(ligand_out_file):
                 results.append(("extracted", ligand_out_file, ""))
             elif max_diff > 0:
                 # Try fuzzy matching - find closest HETATM residue within ±max_diff
                 closest = find_closest_residue(pdb_file, chain_ids, residue_id, max_diff=max_diff)
                 if closest and closest != residue_id:
                     # Re-extract with corrected residue ID
-                    io.save(str(ligand_out_file), LigandSelect(chain_ids, closest))
-                    if _is_valid_ligand_pdb(ligand_out_file):
+                    extracted = extract_ligand_with_conect(pdb_file, chain_ids, closest, ligand_out_file)
+                    if extracted and _is_valid_ligand_pdb(ligand_out_file):
                         results.append(("extracted", ligand_out_file,
                                         f"Fuzzy matched: {residue_id} -> {closest}"))
                         continue
