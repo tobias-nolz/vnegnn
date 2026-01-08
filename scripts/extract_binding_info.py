@@ -194,13 +194,18 @@ def _is_valid_binding_file(binding_path: Path) -> bool:
         return False
 
 
-def process_single_complex(complex_path: Path, threshold: float = 4, skip_depth: bool = False) -> bool:
-    """Process a single protein-ligand complex and extract binding information."""
+def process_single_complex(complex_path: Path, threshold: float = 4, skip_depth: bool = False) -> tuple[bool, str]:
+    """
+    Process a single protein-ligand complex and extract binding information.
+
+    Returns:
+        tuple: (success: bool, message: str)
+    """
     try:
         protein_path = complex_path / "protein.pdb"
         if not protein_path.exists():
-            click.echo(f"Warning: {protein_path} not found, skipping {complex_path}")
-            return False
+            return (False, "protein.pdb not found")
+
         protein = PDBParser(QUIET=True).get_structure("protein", str(protein_path))
         protein_info = extract_protein_info(protein)
 
@@ -208,20 +213,19 @@ def process_single_complex(complex_path: Path, threshold: float = 4, skip_depth:
             complex_path / f for f in os.listdir(complex_path) if f.startswith("ligand")
         ]
         if not ligand_paths:
-            click.echo(f"Warning: No ligand files found in {complex_path}")
-            return False
+            return (False, "No ligand files found")
 
         ligand_mols = []
+        failed_ligands = []
         for ligand_path in ligand_paths:
             mol = read_molecule(str(ligand_path))
             if mol is not None:
                 ligand_mols.append(mol)
             else:
-                click.echo(f"Warning: Could not load ligand {ligand_path}")
+                failed_ligands.append(ligand_path.name)
 
         if not ligand_mols:
-            click.echo(f"Warning: No valid ligands found in {complex_path}")
-            return False
+            return (False, f"No valid ligands found (failed: {', '.join(failed_ligands)})")
 
         ligand_infos = [extract_ligand_info(ligand) for ligand in ligand_mols]
 
@@ -279,12 +283,10 @@ def process_single_complex(complex_path: Path, threshold: float = 4, skip_depth:
             ligand_ids=lig_ids,
         )
 
-        click.echo(f"Successfully processed {complex_path}")
-        return True
+        return (True, f"residues={len(res_ids)}, ligands={len(ligand_mols)}")
 
     except Exception as e:
-        click.echo(f"Error processing {complex_path}: {str(e)}")
-        return False
+        return (False, str(e))
 
 
 @click.command()
@@ -346,18 +348,17 @@ def extract_binding_info(
     - protein.pdb: Protein structure file
     - ligand_*.sdf/mol2/pdb: Ligand structure files
     """
-    if verbose:
-        click.echo(f"Processing complexes in: {path}")
-        click.echo(f"Number of parallel jobs: {n_jobs}")
-        click.echo(f"Binding site threshold: {threshold} Å")
+    click.echo(f"[INFO] Processing complexes in: {path}")
+    click.echo(f"[INFO] Binding site threshold: {threshold} Å")
+    if skip_depth:
+        click.echo("[INFO] Skipping residue depth calculation (--skip-depth)")
 
     complex_dirs = [d for d in path.iterdir() if d.is_dir()]
     if not complex_dirs:
-        click.echo(f"No directories found in {path}")
+        click.echo(f"[WARNING] No directories found in {path}")
         return
 
-    if verbose:
-        click.echo(f"Found {len(complex_dirs)} complex directories")
+    click.echo(f"[INFO] Found {len(complex_dirs)} complex directories")
 
     # Check for existing binding.npz files (skip unless --force)
     skipped_dirs = []
@@ -371,36 +372,67 @@ def extract_binding_info(
                 dirs_to_process.append(complex_dir)
         complex_dirs = dirs_to_process
 
-    if skipped_dirs:
-        click.echo(f"Skipping {len(skipped_dirs)} complexes with existing binding.npz (use --force to regenerate)")
-
     if not complex_dirs:
-        click.echo("All complexes already have binding info. Nothing to do.")
+        click.echo("[INFO] All complexes already have binding info. Nothing to do.")
         return
 
-    click.echo(f"Processing {len(complex_dirs)} complexes")
-    if skip_depth:
-        click.echo("Skipping residue depth calculation (--skip-depth)")
+    click.echo(f"[INFO] Processing {len(complex_dirs)} complexes")
 
+    # Process complexes and collect results
+    all_results = {}
     if n_jobs == 1:
-        results = []
         for complex_dir in tqdm(complex_dirs, desc="Processing complexes"):
             result = process_single_complex(complex_dir, threshold, skip_depth)
-            results.append(result)
+            all_results[complex_dir.name] = result
     else:
-        # Parallel processing
-        results = Parallel(n_jobs=n_jobs, prefer=backend)(
-            delayed(process_single_complex)(complex_dir, threshold, skip_depth)
-            for complex_dir in tqdm(complex_dirs, desc="Processing complexes")
-        )
+        # Parallel processing with proper progress tracking
+        with tqdm(total=len(complex_dirs), desc="Processing complexes") as pbar:
+            results_list = Parallel(n_jobs=n_jobs, prefer=backend, return_as="generator")(
+                delayed(process_single_complex)(complex_dir, threshold, skip_depth)
+                for complex_dir in complex_dirs
+            )
+            for complex_dir, result in zip(complex_dirs, results_list):
+                all_results[complex_dir.name] = result
+                pbar.update(1)
 
-    successful = sum(results)
-    total = len(results)
-    click.echo(
-        f"\nProcessing complete: {successful}/{total} complexes processed successfully"
-    )
-    if skipped_dirs:
-        click.echo(f"Skipped (existing): {len(skipped_dirs)}")
+    # Collect failed complexes
+    failed_complexes = []
+    for complex_name, (success, message) in all_results.items():
+        if not success:
+            failed_complexes.append((complex_name, message))
+            if verbose:
+                click.echo(f"[WARNING] {complex_name}: {message}")
+
+    # Count results
+    successful_count = sum(1 for _, (success, _) in all_results.items() if success)
+    failed_count = len(failed_complexes)
+
+    # Write failed extractions to log file
+    if failed_complexes:
+        log_file = path / "failed_binding_extractions.log"
+        with open(log_file, 'w') as f:
+            f.write("complex_name\terror\n")
+            for complex_name, error in failed_complexes:
+                f.write(f"{complex_name}\t{error}\n")
+
+    # Print summary
+    click.echo(f"""
+=== Binding Info Extraction Summary ===
+Successful: {successful_count}
+Skipped (existing): {len(skipped_dirs)}
+Failed: {failed_count}
+=======================================
+""")
+
+    if failed_complexes and not verbose:
+        log_file = path / "failed_binding_extractions.log"
+        click.echo(f"[INFO] {failed_count} complexes failed. "
+                   f"See {log_file} for details or run with -v for verbose output.")
+
+    if failed_complexes:
+        exit(1)
+    else:
+        exit(0)
 
 
 if __name__ == "__main__":

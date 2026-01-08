@@ -135,17 +135,21 @@ python scripts/process_data.py \
 [--device <cuda_or_cpu>] \
 [--batch <batch_size>] \
 [--threshold <distance_threshold>] \
-[--force]
+[--force] \
+[--skip-depth] \
+[--verbose]
 ```
 
-| Argument      | Short | Type    | Required | Default                            | Description                                                           |
-|---------------|-------|---------|----------|------------------------------------|-----------------------------------------------------------------------|
-| `--data-dir`  | `-p`  | `str`   | ❌ No     | `data/allosteric-sites/allosteric` | Data folder containing protein subfolders                             |
-| `--jobs`      | `-j`  | `int`   | ❌ No     | `1`                                | Number of parallel jobs to pass to scripts                            |
-| `--device`    | `-d`  | `str`   | ❌ No     | `"auto"`                           | Device to use for ESM embedding generation (`auto`, `cpu`, or `cuda`) |
-| `--batch`     | `-b`  | `int`   | ❌ No     | `1`                                | Batch size for ESM embedding generation                               |
-| `--threshold` | `-t`  | `float` | ❌ No     | `4.0`                              | Distance threshold for binding site detection                         |
-| `--force`     | `-f`  | `flag`  | ❌ No     | `False`                            | Force regeneration even if output files already exist                 |
+| Argument       | Short | Type    | Required | Default                            | Description                                                           |
+|----------------|-------|---------|----------|------------------------------------|-----------------------------------------------------------------------|
+| `--data-dir`   | `-p`  | `str`   | ❌ No     | `data/allosteric-sites/allosteric` | Data folder containing protein subfolders                             |
+| `--jobs`       | `-j`  | `int`   | ❌ No     | `1`                                | Number of parallel jobs to pass to scripts                            |
+| `--device`     | `-d`  | `str`   | ❌ No     | `"auto"`                           | Device to use for ESM embedding generation (`auto`, `cpu`, or `cuda`) |
+| `--batch`      | `-b`  | `int`   | ❌ No     | `1`                                | Batch size for ESM embedding generation                               |
+| `--threshold`  | `-t`  | `float` | ❌ No     | `4.0`                              | Distance threshold for binding site detection                         |
+| `--force`      | `-f`  | `flag`  | ❌ No     | `False`                            | Force regeneration even if output files already exist                 |
+| `--skip-depth` | —     | `flag`  | ❌ No     | `False`                            | Skip depth calculation (saves time, but depth features won't be used) |
+| `--verbose`    | `-v`  | `flag`  | ❌ No     | `False`                            | Enable verbose logging                                                |
 
 Without parameters, the script will process the data for the allosteric site prediction. For the other datasets, you
 need to specify the data directory.

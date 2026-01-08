@@ -1,19 +1,15 @@
 #!/usr/bin/env python3
 """
-Portable Python wrapper for scripts/process_data.sh
-Runs generate_esm_embeddings.py and extract_binding_info.py for every folder under data/data
+Wrapper script to process a dataset of protein structures by generating ESM embeddings and extracting binding site information.
 """
+
 from pathlib import Path
-import subprocess
-import sys
-import torch
+
 import click
+import torch
 
-
-def run_command(cmd, cwd=None):
-    print("Running:", " ".join(cmd))
-    res = subprocess.run(cmd, cwd=cwd)
-    print("Script finished with return code:", res.returncode)
+from extract_binding_info import extract_binding_info
+from generate_esm_embeddings import generate_embeddings
 
 
 @click.command()
@@ -64,27 +60,56 @@ def run_command(cmd, cwd=None):
     is_flag=True,
     help="Skip residue depth calculation (MSMS can hang on some structures)"
 )
+@click.option(
+    "--verbose",
+    "-v",
+    is_flag=True,
+    help="Enable verbose output (show individual errors in console)"
+)
+@click.pass_context
 def main(
+        ctx: click.Context,
         data_dir: Path,
         jobs: int,
-        device: Path,
+        device: str,
         batch: int,
         threshold: float,
         force: bool,
-        skip_depth: bool
-):
+        skip_depth: bool,
+        verbose: bool,
+) -> None:
+    """
+    Main function to process the dataset by generating ESM embeddings and extracting binding info.
+
+    Parameters
+    ----------
+    ctx : click.Context
+        Click context to invoke other commands.
+    data_dir : Path
+        Path to the data directory containing a 'raw' subdirectory.
+    jobs : int
+        Number of parallel jobs to use.
+    device : str
+        Device to use for ESM embedding generation ('auto', 'cpu', or 'cuda').
+    batch : int
+        Batch size for ESM embedding generation.
+    threshold : float
+        Distance threshold for binding site detection.
+    force : bool
+        Whether to force regeneration of embeddings and binding info.
+    skip_depth : bool
+        Whether to skip residue depth calculation.
+    verbose : bool
+        Whether to show individual errors in console.
+
+    Returns
+    -------
+    None
+    """
     data_dir = Path(data_dir).resolve()
     data_root = data_dir / "raw"
     if not data_root.exists():
         raise SystemExit(f"Data root not found: {data_root}")
-
-    script_root = Path(__file__).parent.resolve()
-    gen_script = script_root / "generate_esm_embeddings.py"
-    extract_binding_info_script = script_root / "extract_binding_info.py"
-
-    for script in [gen_script, extract_binding_info_script]:
-        if not script.exists():
-            raise SystemExit(f"Script not found: {script}")
 
     if batch <= 0:
         raise SystemExit(f"Batch size must be a positive integer, got: {batch}")
@@ -96,34 +121,45 @@ def main(
     print(f"Processing dataset: {data_root}")
     print("=" * 60)
 
-    print("Generating ESM embeddings...")
-    esm_jobs = jobs if resolved_device != "cuda" else 1
-    esm_cmd = [
-        sys.executable,
-        str(gen_script),
-        "-p", str(data_root),
-        "-j", str(esm_jobs),
-        "-d", resolved_device,
-        "-b", str(batch)
-    ]
-    if force:
-        esm_cmd.append("--force")
-    run_command(esm_cmd)
+    # Generate ESM embeddings using Click's ctx.invoke()
+    print("\nGenerating ESM embeddings...")
+    try:
+        ctx.invoke(
+            generate_embeddings,
+            path=data_root,
+            model="esm2_t33_650M_UR50D",
+            output_format="npz",
+            batch_size=batch,
+            n_jobs=jobs if resolved_device != "cuda" else 1,
+            verbose=verbose,
+            monitor_memory=True,
+            device=resolved_device,
+            force=force,
+        )
+    except SystemExit as e:
+        if e.code != 0:
+            print(f"Warning: Some embeddings failed (exit code {e.code})")
 
-    print("Extracting binding info...")
-    binding_cmd = [
-        sys.executable,
-        str(extract_binding_info_script),
-        "-p", str(data_root),
-        "-j", str(jobs),
-        "-t", str(threshold),
-        "-b", "processes",
-    ]
-    if force:
-        binding_cmd.append("--force")
-    if skip_depth:
-        binding_cmd.append("--skip-depth")
-    run_command(binding_cmd)
+    # Extract binding info using Click's ctx.invoke()
+    print("\nExtracting binding info...")
+    try:
+        ctx.invoke(
+            extract_binding_info,
+            path=data_root,
+            n_jobs=jobs,
+            threshold=threshold,
+            verbose=verbose,
+            backend="processes",
+            force=force,
+            skip_depth=skip_depth,
+        )
+    except SystemExit as e:
+        if e.code != 0:
+            print(f"Warning: Some binding info extractions failed (exit code {e.code})")
+
+    print("\n" + "=" * 60)
+    print("Processing complete!")
+    print("=" * 60)
 
 
 if __name__ == '__main__':

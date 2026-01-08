@@ -153,6 +153,9 @@ def generate_esm_embeddings_batch(
 
     Each chain in multi-chain proteins is processed separately through ESM,
     then the embeddings are concatenated in order to preserve chain boundaries.
+
+    Returns:
+        dict: Maps protein_name to tuple (success: bool, message: str)
     """
     results = {}
     model = None
@@ -172,7 +175,7 @@ def generate_esm_embeddings_batch(
         sequences, errors = extract_sequences_batch(protein_names, base_path)
 
         for protein_name, error in errors.items():
-            results[protein_name] = f"Error: {error}"
+            results[protein_name] = (False, error)
 
         if not sequences:
             return results
@@ -251,15 +254,10 @@ def generate_esm_embeddings_batch(
                         num_chains=len(chain_sequences),
                     )
                 else:
-                    results[protein_name] = (
-                        f"Error: Unsupported output format {output_format}"
-                    )
+                    results[protein_name] = (False, f"Unsupported output format {output_format}")
                     continue
 
-                results[protein_name] = (
-                    f"Successfully generated embeddings for {protein_name} "
-                    f"(seq_len: {len(full_sequence)}, chains: {len(chain_sequences)})"
-                )
+                results[protein_name] = (True, f"seq_len={len(full_sequence)}, chains={len(chain_sequences)}")
 
                 # Explicitly delete variables to free memory
                 del residue_embeddings
@@ -267,7 +265,7 @@ def generate_esm_embeddings_batch(
                 del chain_embeddings
 
             except Exception as e:
-                results[protein_name] = f"Error processing {protein_name}: {str(e)}"
+                results[protein_name] = (False, str(e))
 
         # Clear all large variables
         del sequences
@@ -279,7 +277,7 @@ def generate_esm_embeddings_batch(
     except Exception as e:
         # If model loading or batch processing fails, mark all as failed
         for protein_name in protein_names:
-            results[protein_name] = f"Error: {str(e)}"
+            results[protein_name] = (False, str(e))
 
     finally:
         # Ensure all variables are deleted
@@ -324,7 +322,7 @@ def generate_esm_embeddings_batch(
 @click.option(
     "--batch-size",
     "-b",
-    default=1,
+    default=8,
     type=int,
     help="Number of proteins to process in each batch (default: 8)",
 )
@@ -398,34 +396,27 @@ def generate_embeddings(
     if device == "auto":
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    click.echo(f"Generating ESM embeddings using model: {model}")
-    click.echo(f"Input path: {path}")
-    click.echo(f"Output format: {output_format}")
-    click.echo(f"Batch size: {batch_size}")
-    click.echo(f"Device: {device}")
-    click.echo(f"Using {n_jobs} parallel jobs")
+    click.echo(f"[INFO] Generating ESM embeddings using model: {model}")
+    click.echo(f"[INFO] Input path: {path}")
+    click.echo(f"[INFO] Output format: {output_format}")
+    click.echo(f"[INFO] Batch size: {batch_size}")
+    click.echo(f"[INFO] Device: {device}")
 
     # Show initial memory usage if monitoring
     if monitor_memory and device == "cuda" and torch.cuda.is_available():
         memory_allocated = torch.cuda.memory_allocated() / 1024**3  # GB
-        # memory_reserved = torch.cuda.memory_reserved() / 1024**3  # GB
-        click.echo(
-            f"Initial GPU Memory - Allocated: {memory_allocated:.2f}GB, "
-            "Reserved: {memory_reserved:.2f}GB"
-        )
-
-    click.echo("-" * 50)
+        click.echo(f"[INFO] Initial GPU Memory - Allocated: {memory_allocated:.2f}GB")
 
     try:
         protein_names = [d for d in os.listdir(path) if (path / d).is_dir()]
         if not protein_names:
-            click.echo("No subdirectories found in the specified path!")
+            click.echo("[WARNING] No subdirectories found in the specified path!")
             return
     except Exception as e:
-        click.echo(f"Error reading directory: {e}")
+        click.echo(f"[ERROR] Error reading directory: {e}")
         return
 
-    click.echo(f"Found {len(protein_names)} protein directories")
+    click.echo(f"[INFO] Found {len(protein_names)} protein directories")
 
     # Check for missing PDB files
     missing_files = []
@@ -434,19 +425,11 @@ def generate_embeddings(
         if not pdb_file.exists():
             missing_files.append(protein_name)
 
-    if missing_files:
-        click.echo(f"Warning: {len(missing_files)} directories missing PDB files:")
-        for name in missing_files[:5]:  # Show first 5
-            click.echo(f"  - {name}")
-        if len(missing_files) > 5:
-            click.echo(f"  ... and {len(missing_files) - 5} more")
-        click.echo()
-
     # Filter out proteins without PDB files
     valid_proteins = [name for name in protein_names if name not in missing_files]
 
     if not valid_proteins:
-        click.echo("No valid proteins found!")
+        click.echo("[WARNING] No valid proteins found!")
         return
 
     # Check for existing embeddings (skip unless --force)
@@ -461,25 +444,23 @@ def generate_embeddings(
                 proteins_to_process.append(protein_name)
         valid_proteins = proteins_to_process
 
-    if skipped_proteins:
-        click.echo(f"Skipping {len(skipped_proteins)} proteins with existing embeddings (use --force to regenerate)")
-
     if not valid_proteins:
-        click.echo("All proteins already have embeddings. Nothing to do.")
+        click.echo("[INFO] All proteins already have embeddings. Nothing to do.")
         return
 
-    click.echo(f"Processing {len(valid_proteins)} proteins with PDB files")
+    click.echo(f"[INFO] Processing {len(valid_proteins)} proteins")
 
     # Create batches of proteins
     batches = [
         valid_proteins[i : i + batch_size]
         for i in range(0, len(valid_proteins), batch_size)
     ]
-    click.echo(f"Created {len(batches)} batches of up to {batch_size} proteins each")
+
+    # Track results
+    all_results = {}
+    failed_proteins = []
 
     try:
-        all_results = {}
-
         if n_jobs == 1:
             # Sequential batch processing
             for batch in tqdm(batches, desc="Processing batches"):
@@ -487,73 +468,90 @@ def generate_embeddings(
                     batch, path, model, output_format, device
                 )
                 all_results.update(batch_results)
-                if verbose:
-                    for protein_name, result in batch_results.items():
-                        click.echo(f"  {result}")
 
                 # Force garbage collection after each batch
                 import gc
-
                 gc.collect()
                 if device == "cuda" and torch.cuda.is_available():
                     torch.cuda.empty_cache()
 
                 # Monitor memory usage if requested
                 if monitor_memory and device == "cuda" and torch.cuda.is_available():
-                    memory_allocated = torch.cuda.memory_allocated() / 1024**3  # GB
-                    # memory_reserved = torch.cuda.memory_reserved() / 1024**3  # GB
-                    click.echo(
-                        f"  GPU Memory - Allocated: {memory_allocated:.2f}GB, "
-                        "Reserved: {memory_reserved:.2f}GB"
-                        "{memory_reserved:.2f}GB"
-                    )
+                    memory_allocated = torch.cuda.memory_allocated() / 1024**3
+                    click.echo(f"[INFO] GPU Memory - Allocated: {memory_allocated:.2f}GB")
 
                 if device == "cuda" and torch.cuda.is_available():
                     torch.cuda.reset_peak_memory_stats()
                     torch.cuda.synchronize()
         else:
-            batch_results_list = Parallel(n_jobs=n_jobs)(
-                delayed(generate_esm_embeddings_batch)(
-                    batch, path, model, output_format, device
+            # Parallel processing with proper progress tracking
+            with tqdm(total=len(batches), desc="Processing batches") as pbar:
+                batch_results_list = Parallel(n_jobs=n_jobs, return_as="generator")(
+                    delayed(generate_esm_embeddings_batch)(
+                        batch, path, model, output_format, device
+                    )
+                    for batch in batches
                 )
-                for batch in tqdm(batches, desc="Processing batches")
-            )
-
-            for batch_results in batch_results_list:
-                all_results.update(batch_results)
+                for batch_results in batch_results_list:
+                    all_results.update(batch_results)
+                    pbar.update(1)
 
     except KeyboardInterrupt:
-        click.echo("\nEmbedding generation interrupted by user!")
+        click.echo("\n[WARNING] Embedding generation interrupted by user!")
         return
     except Exception as e:
-        click.echo(f"Error during processing: {e}")
+        click.echo(f"[ERROR] Error during processing: {e}")
         return
 
-    results = {name: all_results[name] for name in valid_proteins}
-    successful = [(name, r) for name, r in results.items() if "Successfully" in r]
-    failed = [(name, r) for name, r in results.items() if "Error" in r]
+    # Collect failed proteins
+    for protein_name, (success, message) in all_results.items():
+        if not success:
+            failed_proteins.append((protein_name, message))
+            if verbose:
+                click.echo(f"[WARNING] {protein_name}: {message}")
 
-    click.echo("\n" + "=" * 50)
-    click.echo("EMBEDDING GENERATION COMPLETE!")
-    click.echo(f"Successful: {len(successful)}")
-    click.echo(f"Skipped (existing): {len(skipped_proteins)}")
-    click.echo(f"Failed: {len(failed)}")
+    # Count results
+    successful_count = sum(1 for _, (success, _) in all_results.items() if success)
+    failed_count = len(failed_proteins)
 
-    if verbose and successful:
-        click.echo("\nSuccessful generations:")
-        for name, msg in successful:
-            click.echo(f"  ✓ {msg}")
+    # Write failed extractions to log file
+    if failed_proteins:
+        log_file = path / "failed_embeddings.log"
+        with open(log_file, 'w') as f:
+            f.write("protein_name\terror\n")
+            for protein_name, error in failed_proteins:
+                f.write(f"{protein_name}\t{error}\n")
 
-    if failed:
-        click.echo("\nFailed generations:")
-        for name, msg in failed:
-            click.echo(f"  ✗ {name}: {msg}")
+    # Also add missing PDB files to failures
+    if missing_files:
+        log_file = path / "failed_embeddings.log"
+        mode = 'a' if failed_proteins else 'w'
+        with open(log_file, mode) as f:
+            if not failed_proteins:
+                f.write("protein_name\terror\n")
+            for protein_name in missing_files:
+                f.write(f"{protein_name}\tPDB file not found\n")
+                if verbose:
+                    click.echo(f"[WARNING] {protein_name}: PDB file not found")
 
-    if failed:
-        click.echo(f"\nWarning: {len(failed)} embedding generations failed!")
+    # Print summary
+    click.echo(f"""
+=== ESM Embedding Generation Summary ===
+Successful: {successful_count}
+Skipped (existing): {len(skipped_proteins)}
+Missing PDB files: {len(missing_files)}
+Failed: {failed_count}
+========================================
+""")
+
+    if (failed_proteins or missing_files) and not verbose:
+        log_file = path / "failed_embeddings.log"
+        click.echo(f"[INFO] {len(failed_proteins) + len(missing_files)} proteins failed. "
+                   f"See {log_file} for details or run with -v for verbose output.")
+
+    if failed_proteins or missing_files:
         exit(1)
     else:
-        click.echo("\nAll embedding generations completed successfully!")
         exit(0)
 
 
