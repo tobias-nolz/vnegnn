@@ -109,8 +109,11 @@ def setup_data(
             'ligand_residue': asd_dataset['modulator_resi'],
         }
     )
-    tqdm.write(f"[INFO] Extracting ligands "
-               f"(force_ligand_extraction={force_ligand_extraction}, max_diff={max_diff}, workers={n_jobs})")
+    tqdm.write(f"[INFO] Extracting ligands ("
+               f"force_ligand_extraction={force_ligand_extraction}, "
+               f"max_diff={max_diff}, "
+               f"workers={n_jobs}"
+               f")")
     prepare_ligands_from_asd(
         pdb_dir=output_dir,
         ligand_info=ligand_info,
