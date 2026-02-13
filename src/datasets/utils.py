@@ -239,7 +239,7 @@ def create_hetero_graph(
         or data["atom"].y.isnan().any()
         or data["global_node"].x.isnan().any()
         or data["global_node"].pos.isnan().any()
-        or data["atom"].res_depths.isnan().any()
+#        or data["atom"].res_depths.isnan().any()  # res_depths are not used in the default VN-EGNN setup and can be skipped (also in pre-processing) to save msms runtime (high impact!)
     ):
         raise ValueError("Nans in the graph with protein name: %s", protein_name)
 
