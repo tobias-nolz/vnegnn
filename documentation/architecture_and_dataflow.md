@@ -82,7 +82,7 @@ The data processing pipeline follows these stages:
 
 The **VN-EGNN** model is an E(n)-equivariant message passing neural network that:
 
-- Takes protein graph representations with node features (ESM embeddings + residue depth)
+- Takes protein graph representations with node features (ESM embeddings)
 - Uses heterogeneous graph structure with atom nodes and global nodes
 - Applies equivariant message passing layers that preserve E(3) symmetry
 - Outputs binding site predictions with confidence scores
@@ -166,17 +166,17 @@ Ligand files serve as **intermediate data** and are used:
 
 The `binding.npz` file is a NumPy compressed archive containing all binding-related data for a protein-ligand complex:
 
-| Key                    | Type      | Shape                     | Description                                          |
-|------------------------|-----------|---------------------------|------------------------------------------------------|
-| `binding_residues`     | `bool`    | `(num_residues,)`         | Binary mask: True if residue is part of binding site |
-| `binding_site_centers` | `float64` | `(num_ligands, 3)`        | XYZ coordinates of each binding site center          |
-| `res_coords`           | `float64` | `(num_residues, 3)`       | CA atom coordinates for each residue                 |
-| `res_names`            | `str`     | `(num_residues,)`         | Three-letter amino acid codes (e.g., "ALA", "GLY")   |
-| `res_ids`              | `int`     | `(num_residues,)`         | PDB residue numbering                                |
-| `chains`               | `str`     | `(num_residues,)`         | Chain identifiers (e.g., "A", "B")                   |
-| `res_depths`           | `float64` | `(num_residues,)`         | Residue depth from protein surface (via MSMS)        |
-| `ligand_coords`        | `float64` | `(total_ligand_atoms, 3)` | All ligand atom coordinates concatenated             |
-| `ligand_ids`           | `int`     | `(total_ligand_atoms,)`   | Ligand index for each atom (0, 1, 2, ...)            |
+| Key                    | Type      | Shape                     | Description                                                                        |
+|------------------------|-----------|---------------------------|------------------------------------------------------------------------------------|
+| `binding_residues`     | `bool`    | `(num_residues,)`         | Binary mask: True if residue is part of binding site                               |
+| `binding_site_centers` | `float64` | `(num_ligands, 3)`        | XYZ coordinates of each binding site center                                        |
+| `res_coords`           | `float64` | `(num_residues, 3)`       | CA atom coordinates for each residue                                               |
+| `res_names`            | `str`     | `(num_residues,)`         | Three-letter amino acid codes (e.g., "ALA", "GLY")                                 |
+| `res_ids`              | `int`     | `(num_residues,)`         | PDB residue numbering                                                              |
+| `chains`               | `str`     | `(num_residues,)`         | Chain identifiers (e.g., "A", "B")                                                 |
+| `res_depths`           | `float64` | `(num_residues,)`         | Residue depth from protein surface (via MSMS, can be skipped for standard VN-EGNN) |
+| `ligand_coords`        | `float64` | `(total_ligand_atoms, 3)` | All ligand atom coordinates concatenated                                           |
+| `ligand_ids`           | `int`     | `(total_ligand_atoms,)`   | Ligand index for each atom (0, 1, 2, ...)                                          |
 
 #### 2.2.2 Generation Process
 
@@ -356,13 +356,13 @@ backbone:
                   │      └─────────────────┘              │
                   │                                       │
                   ▼                                       ▼
-     ┌──────────────────────────┐            ┌────────────────────────┐
-     │generate_esm_embeddings.py│            │extract_binding_info.py │
-     │  - Extract sequence      │            │                        │
-     │  - Run ESM-2 model       │            │  - Calculate distances │
-     │  - Per-residue embeds    │            │  - Find binding sites  │
-     └────────────┬─────────────┘            │  - Compute depths      │
-                  │                          └───────────┬────────────┘
+     ┌──────────────────────────┐            ┌──────────────────────────┐
+     │generate_esm_embeddings.py│            │ extract_binding_info.py  │
+     │  - Extract sequence      │            │  - Calculate distances   │
+     │  - Run ESM-2 model       │            │  - Find binding sites    │
+     │  - Per-residue embeds    │            │  - Compute depths (skip) │
+     └────────────┬─────────────┘            └───────────┬──────────────┘
+                  │                                      │
                   │                                      │
                   ▼                                      ▼
      ┌─────────────────────────┐             ┌────────────────────────┐
@@ -445,6 +445,7 @@ setup_data(
     force_ligand_extraction,  # Re-extract even if exists
     clear_existing_pdb,  # Clear before downloading
     max_diff,  # Fuzzy matching tolerance
+    only_lig, # Only consider "lig" modulators
     verbose  # Detailed logging
 )
 ```
