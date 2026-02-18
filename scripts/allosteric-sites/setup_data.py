@@ -3,11 +3,16 @@
 Setup data for VN-EGNN allosteric site prediction.
 This includes downloading PDB files and extracting ligand information.
 """
+import sys
+import time
 from pathlib import Path
 
 import click
 import pandas as pd
 from tqdm import tqdm
+
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+from time_utils import format_time
 
 from prepare_ligand import prepare_ligands_from_asd
 from prepare_pdb import prepare_pdb_directory
@@ -62,6 +67,11 @@ def setup_data(
     """
     output_dir = Path(output_dir)
 
+    start_time_total = time.time()
+    tqdm.write(f"\n{'=' * 80}")
+    tqdm.write(f"[SETUP_DATA] Starting data setup process")
+    tqdm.write(f"{'=' * 80}\n")
+
     if asd_dataset is None or asd_dataset.empty:
         raise ValueError("ASD dataset is empty or not provided")
 
@@ -72,10 +82,13 @@ def setup_data(
         raise KeyError(f"ASD dataset is missing required columns: {missing_columns}")
 
     # Filter out rows with missing PDB IDs or ligand info
+    start_time_step = time.time()
+    tqdm.write(f"[STEP 1/3] Filtering dataset...")
     initial_count = len(asd_dataset)
     mask = asd_dataset[['allosteric_pdb', 'modulator_chain', 'modulator_resi']].isna().any(axis=1)
     if only_lig:
-        mask = mask | (asd_dataset.get('modulator_class') != 'Lig')
+        asd_dataset['modulator_class'] = asd_dataset['modulator_class'].str.lower()
+        mask = mask | (asd_dataset.get('modulator_class') != 'lig')
     filtered_rows = asd_dataset[mask]
     asd_dataset = asd_dataset[~mask]
     filtered_count = initial_count - len(asd_dataset)
@@ -91,17 +104,27 @@ def setup_data(
     if asd_dataset.empty:
         raise ValueError("No valid entries remain after filtering missing values")
 
+    elapsed_step = time.time() - start_time_step
+    tqdm.write(f"[STEP 1/3] Filtering completed in {format_time(elapsed_step)}")
+    tqdm.write(f"[INFO] {len(asd_dataset)} valid entries remain\n")
+
     # Prepare PDB directory (download PDB files)
+    start_time_step = time.time()
+    tqdm.write(f"[STEP 2/3] Preparing PDB directory...")
     pdb_ids = asd_dataset['allosteric_pdb'].tolist()
-    tqdm.write(f"[INFO] Preparing PDB directory at {output_dir} with {len(pdb_ids)} entries (workers={n_jobs})")
+    tqdm.write(f"[INFO] Downloading {len(pdb_ids)} PDB files to {output_dir} (workers={n_jobs})")
     prepare_pdb_directory(
         pdb_dir=output_dir,
         pdb_ids=pdb_ids,
         clear_existing=clear_existing_pdb,
         n_jobs=n_jobs
     )
+    elapsed_step = time.time() - start_time_step
+    tqdm.write(f"[STEP 2/3] PDB preparation completed in {format_time(elapsed_step)}\n")
 
     # Extract ligands from PDB files
+    start_time_step = time.time()
+    tqdm.write(f"[STEP 3/3] Extracting ligands...")
     ligand_info = pd.DataFrame(
         {
             'pdb_id': asd_dataset['allosteric_pdb'],
@@ -109,7 +132,7 @@ def setup_data(
             'ligand_residue': asd_dataset['modulator_resi'],
         }
     )
-    tqdm.write(f"[INFO] Extracting ligands ("
+    tqdm.write(f"[INFO] Processing {len(ligand_info)} ligands ("
                f"force_ligand_extraction={force_ligand_extraction}, "
                f"max_diff={max_diff}, "
                f"workers={n_jobs}"
@@ -123,6 +146,13 @@ def setup_data(
         print_summary=True,
         verbose=verbose
     )
+    elapsed_step = time.time() - start_time_step
+    tqdm.write(f"[STEP 3/3] Ligand extraction completed in {format_time(elapsed_step)}\n")
+
+    elapsed_total = time.time() - start_time_total
+    tqdm.write(f"{'=' * 80}")
+    tqdm.write(f"[SETUP_DATA] Total setup_data time: {format_time(elapsed_total)}")
+    tqdm.write(f"{'=' * 80}\n")
 
 
 def _read_asd_dataset(path: Path) -> pd.DataFrame:
@@ -184,9 +214,11 @@ def setup_splits(
     -------
     None
     """
+    start_time = time.time()
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Get all valid PDB IDs in raw_dir
+    tqdm.write(f"[SETUP_SPLITS] Scanning {raw_dir} for valid PDB structures...")
     valid_pdb_ids = set()
     invalid_pdb_ids = set()
     for pdb_dir in raw_dir.iterdir():
@@ -252,6 +284,9 @@ def setup_splits(
         for pdb_id in test_pdbs:
             f.write(f"{pdb_id}\n")
     tqdm.write(f"[INFO] Written {len(test_pdbs)} test PDB IDs to {output_dir / 'test_ids_allosteric'}")
+
+    elapsed = time.time() - start_time
+    tqdm.write(f"[SETUP_SPLITS] Completed in {format_time(elapsed)}\n")
 
 
 @click.command()
@@ -361,6 +396,11 @@ def main(
     -------
     None
     """
+    start_time_main = time.time()
+    tqdm.write(f"\n{'=' * 80}")
+    tqdm.write(f"[MAIN] Starting allosteric site data setup")
+    tqdm.write(f"{'=' * 80}\n")
+
     print(f"Loading ASD dataset from: {asd_file}")
     asd_df = _read_asd_dataset(asd_file)
 
@@ -385,6 +425,11 @@ def main(
         raw_dir=raw_dir,
         exclude_ids_files=list(exclude_ids) if exclude_ids else None
     )
+
+    elapsed_main = time.time() - start_time_main
+    tqdm.write(f"{'=' * 80}")
+    tqdm.write(f"[MAIN] Total execution time: {format_time(elapsed_main)}")
+    tqdm.write(f"{'=' * 80}\n")
 
 
 if __name__ == '__main__':

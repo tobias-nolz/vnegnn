@@ -4,12 +4,14 @@ Wrapper script to process a dataset of protein structures by generating ESM embe
 """
 
 from pathlib import Path
+import time
 
 import click
 import torch
 
 from extract_binding_info import extract_binding_info
 from generate_esm_embeddings import generate_embeddings
+from time_utils import format_time
 
 
 @click.command()
@@ -106,6 +108,8 @@ def main(
     -------
     None
     """
+    start_time_main = time.time()
+
     data_dir = Path(data_dir).resolve()
     data_root = data_dir / "raw"
     if not data_root.exists():
@@ -117,12 +121,15 @@ def main(
     resolved_device = device if device != "auto" else ("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {resolved_device}")
 
-    print("\n" + "=" * 60)
-    print(f"Processing dataset: {data_root}")
-    print("=" * 60)
+    print("\n" + "=" * 80)
+    print(f"[MAIN] Starting dataset processing")
+    print(f"[INFO] Dataset: {data_root}")
+    print(f"[INFO] Device: {resolved_device}, Batch size: {batch}, Workers: {jobs}")
+    print("=" * 80)
 
     # Generate ESM embeddings using Click's ctx.invoke()
-    print("\nGenerating ESM embeddings...")
+    print("\n[STEP 1/2] Generating ESM embeddings...")
+    start_time_step = time.time()
     try:
         ctx.invoke(
             generate_embeddings,
@@ -136,12 +143,17 @@ def main(
             device=resolved_device,
             force=force,
         )
+        elapsed_step = time.time() - start_time_step
+        print(f"[STEP 1/2] ESM embedding generation completed in {format_time(elapsed_step)}")
     except SystemExit as e:
+        elapsed_step = time.time() - start_time_step
+        print(f"[STEP 1/2] ESM embedding generation completed with warnings in {format_time(elapsed_step)}")
         if e.code != 0:
-            print(f"Warning: Some embeddings failed (exit code {e.code})")
+            print(f"[WARNING] Some embeddings failed (exit code {e.code})")
 
     # Extract binding info using Click's ctx.invoke()
-    print("\nExtracting binding info...")
+    print("\n[STEP 2/2] Extracting binding info...")
+    start_time_step = time.time()
     try:
         ctx.invoke(
             extract_binding_info,
@@ -153,13 +165,19 @@ def main(
             force=force,
             skip_depth=skip_depth,
         )
+        elapsed_step = time.time() - start_time_step
+        print(f"[STEP 2/2] Binding info extraction completed in {format_time(elapsed_step)}")
     except SystemExit as e:
+        elapsed_step = time.time() - start_time_step
+        print(f"[STEP 2/2] Binding info extraction completed with warnings in {format_time(elapsed_step)}")
         if e.code != 0:
-            print(f"Warning: Some binding info extractions failed (exit code {e.code})")
+            print(f"[WARNING] Some binding info extractions failed (exit code {e.code})")
 
-    print("\n" + "=" * 60)
-    print("Processing complete!")
-    print("=" * 60)
+    elapsed_main = time.time() - start_time_main
+    print("\n" + "=" * 80)
+    print(f"[MAIN] Processing complete!")
+    print(f"[MAIN] Total execution time: {format_time(elapsed_main)}")
+    print("=" * 80)
 
 
 if __name__ == '__main__':
