@@ -87,20 +87,21 @@ For more information on the Allosteric Database (ASD) dataset, please refer to t
     [--only-lig] \
     [--verbose]
    ```
-    
-    | Argument                    | Short | Type   | Required | Default                            | Description                                                                                                     |
-    |-----------------------------|-------|--------|----------|------------------------------------|-----------------------------------------------------------------------------------------------------------------|
-    | `--asd-file`                | `-a`  | `str`  | ✅ Yes    | —                                  | Path to ASD dataset file (CSV/TSV) containing columns `allosteric_pdb`, `modulator_chain`, and `modulator_resi` |
-    | `--output-dir`              | `-o`  | `str`  | ❌ No     | `data/allosteric-sites/allosteric` | Directory where allosteric-site data will be stored.                                                            |
-    | `--jobs`                    | `-j`  | `int`  | ❌ No     | `1`                                | Number of parallel workers                                                                                      |
-    | `--force-ligand-extraction` | `-f`  | `flag` | ❌ No     | `False`                            | Force re-extraction of ligand files even if they already exist                                                  |
-    | `--clear-existing-pdb`      | —     | `flag` | ❌ No     | `False`                            | Clear existing PDB files before downloading new ones                                                            |
-    | `--max-diff`                | `-m`  | `int`  | ❌ No     | `0`                                | Maximum residue ID difference for fuzzy matching (0 = exact only, 2 = allow ±2)                                 |
-    | `--exclude-ids`             | `-e`  | `str`  | ❌ No     | `None`                             | Path to file(s) with PDB IDs to exclude (can be specified multiple times)                                       |
-    | `--only-lig`                | —     | `flag` | ❌ No     | `False`                            | Only use rows where `modulator_class='Lig'`                                                                     |
-    | `--verbose`                 | `-v`  | `flag` | ❌ No     | `False`                            | Enable verbose logging                                                                                          |
 
-   **Preventing Data Leakage:** To ensure fair evaluation, use `--exclude-ids` to exclude PDBs used during training and validation:
+   | Argument                    | Short | Type   | Required | Default                            | Description                                                                                                     |
+          |-----------------------------|-------|--------|----------|------------------------------------|-----------------------------------------------------------------------------------------------------------------|
+   | `--asd-file`                | `-a`  | `str`  | ✅ Yes    | —                                  | Path to ASD dataset file (CSV/TSV) containing columns `allosteric_pdb`, `modulator_chain`, and `modulator_resi` |
+   | `--output-dir`              | `-o`  | `str`  | ❌ No     | `data/allosteric-sites/allosteric` | Directory where allosteric-site data will be stored.                                                            |
+   | `--jobs`                    | `-j`  | `int`  | ❌ No     | `1`                                | Number of parallel workers                                                                                      |
+   | `--force-ligand-extraction` | `-f`  | `flag` | ❌ No     | `False`                            | Force re-extraction of ligand files even if they already exist                                                  |
+   | `--clear-existing-pdb`      | —     | `flag` | ❌ No     | `False`                            | Clear existing PDB files before downloading new ones                                                            |
+   | `--max-diff`                | `-m`  | `int`  | ❌ No     | `0`                                | Maximum residue ID difference for fuzzy matching (0 = exact only, 2 = allow ±2)                                 |
+   | `--exclude-ids`             | `-e`  | `str`  | ❌ No     | `None`                             | Path to file(s) with PDB IDs to exclude (can be specified multiple times)                                       |
+   | `--only-lig`                | —     | `flag` | ❌ No     | `False`                            | Only use rows where `modulator_class='Lig'`                                                                     |
+   | `--verbose`                 | `-v`  | `flag` | ❌ No     | `False`                            | Enable verbose logging                                                                                          |
+
+   **Preventing Data Leakage:** To ensure fair evaluation, use `--exclude-ids` to exclude PDBs used during training and
+   validation:
    ```bash
    # If trained on sc-pdb (exclude both train and valid):
    python scripts/allosteric-sites/setup_data.py \
@@ -155,8 +156,8 @@ Without parameters, the script will process the data for the allosteric site pre
 need to specify the data directory.
 
 Note: You will need MSMS installed and available in your PATH for surface generation. You can download MSMS from
-[here](https://ccsb.scripps.edu/msms/downloads/). After downloading, make sure to add the MSMS binary to your system PATH.
-
+[here](https://ccsb.scripps.edu/msms/downloads/). After downloading, make sure to add the MSMS binary to your system
+PATH.
 
 ## Data Structure
 
@@ -197,6 +198,9 @@ saved automatically.
 # Train
 python src/train.py experiment=vnegnn
 ```
+
+I provide the [best_model_weights.ckpt](best_model_weights.ckpt) which I obtained in epoch `1299` during training with
+the `vnegnn` experiment config.
 
 ## Model Evaluation
 
