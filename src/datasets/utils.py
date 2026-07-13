@@ -140,6 +140,8 @@ def create_hetero_graph(
     graph_info: GraphInfo,
     res_depths: npt.NDArray | None = None,
     esm_features: npt.NDArray | None = None,
+    site_type: int = 0,
+    site_types: npt.NDArray | None = None,
 ) -> HeteroData:
     """Create a hetero graph.
 
@@ -154,6 +156,11 @@ def create_hetero_graph(
         graph_info: Graph information
         res_depths: Residue depths
         esm_features: ESM features
+        site_type: Default binding-site class for the whole protein
+            (0 = orthosteric, 1 = allosteric), used when `site_types` is not given.
+        site_types: Optional per-center class array (aligned with `binding_sites`),
+            used for proteins that contain both orthosteric and allosteric sites. When
+            provided it overrides the uniform `site_type`.
     """
     edge_index = radius_graph(
         torch.from_numpy(coords),
@@ -170,8 +177,26 @@ def create_hetero_graph(
     if binding_sites is not None:
         data["atom"].y = torch.from_numpy(binding_residues).float()
         data["atom"].bindingsite_center = torch.from_numpy(binding_sites)
+        if site_types is not None:
+            if len(site_types) != len(binding_sites):
+                raise ValueError(
+                    f"site_types ({len(site_types)}) must align with binding_sites "
+                    f"({len(binding_sites)}) for protein {protein_name}"
+                )
+            data["atom"].bindingsite_site_type = torch.from_numpy(
+                np.asarray(site_types)
+            ).long()
+        else:
+            data["atom"].bindingsite_site_type = torch.full(
+                (len(binding_sites),), site_type, dtype=torch.long
+            )
         data["ligand"].ligand_coords = torch.from_numpy(ligand_coords)
         data["ligand"].ligand_ids = torch.from_numpy(ligand_ids)
+
+    # Graph-level reference label for the protein (collates to [num_graphs]). Training
+    # supervision uses the per-center `bindingsite_site_type` above; this scalar is kept
+    # for analysis/logging and as the per-protein default.
+    data.site_type = torch.tensor([site_type], dtype=torch.long)
 
     if esm_features is not None:
         data["atom"].x = cat_features(data["atom"].x, esm_features)

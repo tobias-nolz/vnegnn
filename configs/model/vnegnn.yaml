@@ -16,8 +16,17 @@ loss:
     _target_: src.modules.losses.ConfidenceLoss
   segmentation_loss:
     _target_: src.modules.losses.DiceLoss
+  # Binary orthosteric(0)/allosteric(1) head. For class imbalance pass a
+  # pos_weight, e.g. add `pos_weight: {_target_: torch.tensor, data: [2.0]}`.
+  classification_loss:
+    _target_: torch.nn.BCEWithLogitsLoss
   confidence_loss_weight: 1.0
   segmentation_loss_weight: 1.0
+  classification_loss_weight: 1.0
+  # Each virtual node is labelled with the site type of its nearest annotated center.
+  # Set to e.g. 8.0 to only train/evaluate the classifier on virtual nodes within that
+  # many Angstrom of a real site (foreground); null supervises every virtual node.
+  classification_foreground_dist: null
 
 backbone:
   _target_: src.models.vnegnn.VNEGNN

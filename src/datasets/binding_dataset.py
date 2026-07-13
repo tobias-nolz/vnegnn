@@ -42,6 +42,7 @@ class BindingDataset(InMemoryDataset):
         sampling_strategy: Literal["fibonacci", "uniform"] = "fibonacci",
         sample_radius: bool = False,
         force_reload: bool = False,
+        site_type: int = 0,
     ):
         self.protein_names = protein_names
         self.graph_info = graph_info
@@ -53,6 +54,7 @@ class BindingDataset(InMemoryDataset):
         self.global_node_subsample_size = global_node_subsample_size
         self.sampling_strategy = sampling_strategy
         self.sample_radius = sample_radius
+        self.site_type = site_type
 
         super().__init__(root, force_reload=force_reload)
         self.data, self.slices = torch.load(self.processed_paths[0], weights_only=False)
@@ -71,7 +73,10 @@ class BindingDataset(InMemoryDataset):
 
         graph_info_ha = sha256(graph_info_ha.encode()).hexdigest()
         protein_ha = sha256(protein_ha.encode()).hexdigest()
-        full_hash = sha256((graph_info_ha + protein_ha).encode()).hexdigest()[:8]
+        site_type_ha = sha256(str(self.site_type).encode()).hexdigest()
+        full_hash = sha256(
+            (graph_info_ha + protein_ha + site_type_ha).encode()
+        ).hexdigest()[:8]
 
         name = f"{full_hash}_{self.label}.pt"
         return [name]
@@ -88,6 +93,13 @@ class BindingDataset(InMemoryDataset):
                 binding_sites = binding_info["binding_site_centers"]
                 esm_features = np.load(path / "embeddings.npz")["residue_embeddings"]
                 res_depths = binding_info["res_depths"]
+                # Per-center labels are only present for mixed (ortho+allo) proteins;
+                # otherwise fall back to the dataset-level `site_type`.
+                site_types = (
+                    binding_info["site_types"]
+                    if "site_types" in binding_info.files
+                    else None
+                )
 
                 return create_hetero_graph(
                     protein_name=path.stem,
@@ -100,6 +112,8 @@ class BindingDataset(InMemoryDataset):
                     binding_residues=binding_residues,
                     esm_features=esm_features,
                     graph_info=self.graph_info,
+                    site_type=self.site_type,
+                    site_types=site_types,
                 )
             except Exception as e:
                 log.warning(f"Error in {path}: {e}")
@@ -258,7 +272,9 @@ class BindingDataModule(pl.LightningDataModule):
         self.backend = backend
 
     def _create_dataloader(
-        self, mode: Literal["train", "valid", "coach420", "holo4k", "pdbbind2020", "allosteric"]
+        self,
+        mode: Literal["train", "valid", "coach420", "holo4k", "pdbbind2020", "allosteric"],
+        site_type: int = 0,
     ) -> DataLoader:
         match mode:
             case "train" | "valid":
@@ -300,6 +316,7 @@ class BindingDataModule(pl.LightningDataModule):
                 n_jobs=self.n_jobs,
                 backend=self.backend,
                 force_reload=self.force_reload,
+                site_type=site_type,
             ),
             batch_size=self.batch_size,
             shuffle=self.shuffle if mode == "train" else False,

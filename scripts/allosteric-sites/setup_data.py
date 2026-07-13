@@ -15,6 +15,7 @@ sys.path.append(str(Path(__file__).resolve().parent.parent))
 from time_utils import format_time
 
 from prepare_ligand import prepare_ligands_from_asd
+from prepare_orthosteric import prepare_orthosteric_from_asd
 from prepare_pdb import prepare_pdb_directory
 
 
@@ -26,7 +27,9 @@ def setup_data(
         clear_existing_pdb: bool = False,
         max_diff: int = 0,
         only_lig: bool = True,
-        verbose: bool = False
+        verbose: bool = False,
+        extract_orthosteric: bool = False,
+        ortho_min_heavy_atoms: int = 6,
 ) -> None:
     """
     Setup data for VN-EGNN allosteric site prediction.
@@ -148,6 +151,22 @@ def setup_data(
     )
     elapsed_step = time.time() - start_time_step
     tqdm.write(f"[STEP 3/3] Ligand extraction completed in {format_time(elapsed_step)}\n")
+
+    # Optionally harvest non-modulator co-crystallized ligands as orthosteric (class 0)
+    # sites, so an ASD protein carries both classes. Heuristic -- see prepare_orthosteric.
+    if extract_orthosteric:
+        start_time_step = time.time()
+        tqdm.write(f"[STEP 3b/3] Extracting orthosteric-candidate ligands...")
+        prepare_orthosteric_from_asd(
+            pdb_dir=output_dir,
+            ligand_info=ligand_info,
+            min_heavy_atoms=ortho_min_heavy_atoms,
+            force=force_ligand_extraction,
+            workers=n_jobs,
+            print_summary=True,
+        )
+        elapsed_step = time.time() - start_time_step
+        tqdm.write(f"[STEP 3b/3] Orthosteric extraction completed in {format_time(elapsed_step)}\n")
 
     elapsed_total = time.time() - start_time_total
     tqdm.write(f"{'=' * 80}")
@@ -357,6 +376,19 @@ def setup_splits(
     default=False,
     help="Only process ligands (modulator_class == 'Lig')"
 )
+@click.option(
+    "--extract-orthosteric",
+    is_flag=True,
+    default=False,
+    help=("Also harvest non-modulator co-crystallized ligands as orthosteric (class 0) "
+          "sites, so ASD proteins carry both classes. Heuristic; see prepare_orthosteric.py.")
+)
+@click.option(
+    "--ortho-min-heavy-atoms",
+    default=6,
+    type=int,
+    help="Minimum heavy-atom count for an orthosteric-candidate ligand (default 6)."
+)
 def main(
         output_dir: Path,
         asd_file: Path,
@@ -367,6 +399,8 @@ def main(
         verbose: bool,
         exclude_ids: tuple,
         only_lig: bool,
+        extract_orthosteric: bool,
+        ortho_min_heavy_atoms: int,
 ):
     """
     Main function to setup data for VN-EGNN allosteric site prediction.
@@ -416,7 +450,9 @@ def main(
         clear_existing_pdb=clear_existing_pdb,
         max_diff=max_diff,
         verbose=verbose,
-        only_lig=only_lig
+        only_lig=only_lig,
+        extract_orthosteric=extract_orthosteric,
+        ortho_min_heavy_atoms=ortho_min_heavy_atoms,
     )
 
     split_dir = output_dir / 'splits'

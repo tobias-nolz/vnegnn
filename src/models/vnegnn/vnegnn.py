@@ -305,6 +305,16 @@ class VNEGNN(nn.Module):
             nn.Linear(out_features, 1),
         )
 
+        # Separate binary head predicting the allosteric probability of each virtual
+        # node's site (0 = orthosteric, 1 = allosteric). Kept independent from the
+        # confidence module, which is only responsible for ranking.
+        self.classifier_mlp = nn.Sequential(
+            nn.Linear(out_features, out_features),
+            nn.Dropout(dropout),
+            act(),
+            nn.Linear(out_features, 1),
+        )
+
     def create_layer(
         self,
         node_features,
@@ -408,5 +418,6 @@ class VNEGNN(nn.Module):
 
         x_atom = self.head(x_atom)
         confidence_out = self.confidence_mlp(x_global_node)
+        class_out = self.classifier_mlp(x_global_node)
 
-        return x_atom, pos_global_node, x_global_node, confidence_out
+        return x_atom, pos_global_node, x_global_node, confidence_out, class_out

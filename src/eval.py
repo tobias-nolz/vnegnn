@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Tuple
 import hydra
 import sys
 import lightning as pl
+import numpy as np
 import pandas as pd
 import rootutils
 import torch
@@ -31,6 +32,7 @@ from src.utils import (  # noqa: E402
     task_wrapper,
 )
 from src.utils.misc import (  # noqa: E402
+    collect_site_classifications,
     compute_metric_ratios,
     evaluate_all_proteins,
     predictions_to_df,
@@ -80,6 +82,10 @@ def evaluate(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
     run_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
 
+    # Detection-conditioned classifier records pooled across all test datasets:
+    # (true_class, allosteric_prob) for every ground-truth site the model localized.
+    classifier_records: List[Tuple[int, float]] = []
+
     for (
             dataloader_name,
             dataloader_index,
@@ -102,10 +108,15 @@ def evaluate(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         )
 
         log.info(f"Evaluating all {dataloader_name} proteins...")
+        # The allosteric dataset may carry per-site labels (orthosteric ligands added
+        # for joint training); restrict its DCC/DCA to allosteric (1) ground-truth sites
+        # so the benchmark stays comparable to the zero-shot allosteric numbers.
+        site_type_filter = 1 if dataloader_name == "allosteric" else None
         res = evaluate_all_proteins(
             df=predictions_df,
             protein_path=Path(dataset.raw_dir),
             num_global_nodes=8,
+            site_type_filter=site_type_filter,
         )
         df_res = pd.DataFrame(res)
         _, df_rank_dca, dca_ratio_cols = compute_metric_ratios(df_res, "dca")
@@ -118,6 +129,43 @@ def evaluate(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
         logger[0].log_metrics(dca_mean)
         logger[0].log_metrics(dcc_mean)
+
+        # Decouple detection from classification: only score the classifier on sites the
+        # model actually found (a virtual node within the DCC threshold). Orthosteric
+        # benchmarks contribute class-0 detections, the allosteric set class-1.
+        default_class = 1 if dataloader_name == "allosteric" else 0
+        for protein_name in predictions_df["protein_name"].unique():
+            classifier_records.extend(
+                collect_site_classifications(
+                    protein_name=protein_name,
+                    df=predictions_df,
+                    protein_path=Path(dataset.raw_dir),
+                    threshold=4.0,
+                    site_type_filter=site_type_filter,
+                    default_class=default_class,
+                )
+            )
+
+    if classifier_records:
+        y_true = np.array([c for c, _ in classifier_records])
+        y_prob = np.array([p for _, p in classifier_records])
+        acc = float(((y_prob >= 0.5).astype(int) == y_true).mean())
+        classifier_metrics = {
+            "classifier/acc_detected": acc,
+            "classifier/n_detected": int(len(classifier_records)),
+        }
+        if len(np.unique(y_true)) == 2:
+            from sklearn.metrics import roc_auc_score
+
+            classifier_metrics["classifier/auroc_detected"] = float(
+                roc_auc_score(y_true, y_prob)
+            )
+        else:
+            log.info(
+                "Only one site class among detected sites; skipping detected AUROC."
+            )
+        log.info(f"Detection-conditioned classifier metrics: {classifier_metrics}")
+        logger[0].log_metrics(classifier_metrics)
 
     metric_dict = trainer.callback_metrics
     return metric_dict, object_dict

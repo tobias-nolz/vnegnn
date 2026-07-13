@@ -29,15 +29,17 @@ def calc_group_var(pos: Tensor, index: Tensor) -> Tensor:
 def multi_predictions(model: nn.Module, batch: Dict[str, Tensor], num_cycles: int):
     pred_pos_cycles = []
     pred_conf_cycles = []
+    pred_class_cycles = []
     batch_global_nodes_cycles = []
     virtual_nodes_initial_pos = []
 
     for i in range(num_cycles):
-        _, pred_pos, _, pred_conf = model(batch)
+        _, pred_pos, _, pred_conf, pred_class = model(batch)
         batch_global_nodes = batch["global_node"].batch
 
         pred_pos_cycles.append(pred_pos.cpu())
         pred_conf_cycles.append(pred_conf.cpu())
+        pred_class_cycles.append(pred_class.cpu())
         batch_global_nodes_cycles.append(batch_global_nodes.cpu())
 
         centroids = rearrange(batch.centroid, "(s d) -> s d", d=3)
@@ -60,13 +62,20 @@ def multi_predictions(model: nn.Module, batch: Dict[str, Tensor], num_cycles: in
 
     pred_pos = torch.cat(pred_pos_cycles).to(batch["global_node"].pos.device)
     pred_conf = torch.cat(pred_conf_cycles).to(batch["global_node"].pos.device)
+    pred_class = torch.cat(pred_class_cycles).to(batch["global_node"].pos.device)
     batch_global_nodes = torch.cat(batch_global_nodes_cycles).to(
         batch["global_node"].pos.device
     )
     virtual_nodes_initial_pos = torch.cat(virtual_nodes_initial_pos).to(
         batch["global_node"].pos.device
     )
-    return pred_pos, pred_conf, batch_global_nodes, virtual_nodes_initial_pos
+    return (
+        pred_pos,
+        pred_conf,
+        pred_class,
+        batch_global_nodes,
+        virtual_nodes_initial_pos,
+    )
 
 
 def _to_numpy(x):
@@ -260,6 +269,7 @@ def evaluate_protein_predictions(
     threshold=4.0,
     cluster_preds=True,
     cluster_algorithm=MeanShift(),
+    site_type_filter=None,
 ):
     """
     Evaluate predictions for a single protein.
@@ -275,19 +285,36 @@ def evaluate_protein_predictions(
         cluster_preds: Whether to cluster predictions before evaluation (default: True)
         cluster_algorithm: Clustering algorithm instance (e.g., MeanShift()),
             required if cluster_preds=True
+        site_type_filter: If set (0=orthosteric, 1=allosteric), restrict the ground-truth
+            sites/ligands to that class using the per-site `site_types` in binding.npz.
+            Proteins without `site_types` are single-class and left unfiltered (the
+            caller only filters datasets whose implicit class equals the filter).
 
     Returns:
         dict: Dictionary containing protein_name, num_ligs, and rank metrics
-            (n_rank_dca_*, n_rank_dcc_*)
+            (n_rank_dca_*, n_rank_dcc_*); or None if no ground-truth site of the
+            requested class remains after filtering.
     """
     binding = np.load(protein_path / f"{protein_name}/binding.npz")
     bindingsite_centers = binding["binding_site_centers"]
+    ligand_coords = binding["ligand_coords"]
+    ligand_ids = binding["ligand_ids"]
+
+    if site_type_filter is not None and "site_types" in binding.files:
+        site_types = binding["site_types"]
+        center_mask = site_types == site_type_filter
+        atom_mask = site_types[ligand_ids] == site_type_filter
+        bindingsite_centers = bindingsite_centers[center_mask]
+        ligand_coords = ligand_coords[atom_mask]
+        ligand_ids = ligand_ids[atom_mask]
+        if len(ligand_ids) == 0 and len(bindingsite_centers) == 0:
+            return None
 
     df_selected_protein = df.loc[lambda x: x["protein_name"] == protein_name]
     pred_coords = df_selected_protein[["x", "y", "z"]].values
     confs = df_selected_protein["confidence_0"].values
 
-    lig_ids = np.unique(binding["ligand_ids"])
+    lig_ids = np.unique(ligand_ids)
     num_ligs = len(lig_ids)
 
     n_rank = {f"n_rank_dca_{i}": 0 for i in range(num_global_nodes)}
@@ -301,7 +328,7 @@ def evaluate_protein_predictions(
     confs_rank = np.argsort(confs)[::-1]
 
     for lig_id in lig_ids:
-        lig_coords = binding["ligand_coords"][binding["ligand_ids"] == lig_id]
+        lig_coords = ligand_coords[ligand_ids == lig_id]
         for i, rank in enumerate(range(num_global_nodes)):
             top_i = confs_rank[: i + num_ligs]
             top_i_coords = pred_coords[top_i]
@@ -331,6 +358,7 @@ def evaluate_all_proteins(
     cluster_preds=True,
     cluster_algorithm=MeanShift(),
     show_progress=True,
+    site_type_filter=None,
 ):
     """
     Evaluate predictions for all proteins in the dataframe.
@@ -363,10 +391,74 @@ def evaluate_all_proteins(
             threshold=threshold,
             cluster_preds=cluster_preds,
             cluster_algorithm=cluster_algorithm,
+            site_type_filter=site_type_filter,
         )
-        res.append(result)
+        if result is not None:
+            res.append(result)
 
     return res
+
+
+def collect_site_classifications(
+    protein_name,
+    df,
+    protein_path,
+    threshold=4.0,
+    site_type_filter=None,
+    default_class=None,
+):
+    """Detection-conditioned classifier records for one protein.
+
+    For each ground-truth site, find the nearest predicted virtual node. If that node is
+    within ``threshold`` (i.e. the site is a *successful detection*), record a
+    ``(true_class, allosteric_prob)`` pair, where ``allosteric_prob`` is the classifier
+    output of that nearest node. This measures "given a found pocket, is its type
+    correct" and ignores sites the model never localized.
+
+    Args:
+        protein_name: Protein to evaluate.
+        df: Prediction dataframe with columns protein_name, x, y, z, allosteric_prob_0.
+        protein_path: Directory containing ``<protein_name>/binding.npz``.
+        threshold: Detection distance threshold in Angstrom (default 4.0).
+        site_type_filter: If set, only consider ground-truth sites of this class.
+        default_class: Class to assign when ``binding.npz`` has no per-site ``site_types``
+            (single-class dataset). If None and ``site_types`` is absent, returns [].
+
+    Returns:
+        list[tuple[int, float]]: (true_class, allosteric_prob) per detected site.
+    """
+    if "allosteric_prob_0" not in df.columns:
+        return []
+
+    binding = np.load(protein_path / f"{protein_name}/binding.npz")
+    centers = binding["binding_site_centers"]
+    if "site_types" in binding.files:
+        site_types = binding["site_types"]
+    elif default_class is not None:
+        site_types = np.full(len(centers), default_class, dtype=int)
+    else:
+        return []
+
+    if site_type_filter is not None:
+        keep = site_types == site_type_filter
+        centers = centers[keep]
+        site_types = site_types[keep]
+    if len(centers) == 0:
+        return []
+
+    sel = df.loc[lambda x: x["protein_name"] == protein_name]
+    if len(sel) == 0:
+        return []
+    pred_coords = sel[["x", "y", "z"]].values
+    probs = sel["allosteric_prob_0"].values
+
+    records = []
+    for center, cls in zip(centers, site_types):
+        dists = np.linalg.norm(pred_coords - center, axis=1)
+        nearest = int(dists.argmin())
+        if dists[nearest] <= threshold:
+            records.append((int(cls), float(probs[nearest])))
+    return records
 
 
 def compute_metric_ratios(df, metric_name, denominator_col="num_ligs", decimals=2):

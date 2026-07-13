@@ -209,18 +209,24 @@ def process_single_complex(complex_path: Path, threshold: float = 4, skip_depth:
         protein = PDBParser(QUIET=True).get_structure("protein", str(protein_path))
         protein_info = extract_protein_info(protein)
 
-        ligand_paths = [
-            complex_path / f for f in os.listdir(complex_path) if f.startswith("ligand")
-        ]
+        # Sort so ligand indices (and the site_types below) are deterministic.
+        ligand_paths = sorted(
+            (complex_path / f for f in os.listdir(complex_path) if f.startswith("ligand")),
+            key=lambda p: p.name,
+        )
         if not ligand_paths:
             return (False, "No ligand files found")
 
         ligand_mols = []
+        ligand_site_types = []
         failed_ligands = []
         for ligand_path in ligand_paths:
             mol = read_molecule(str(ligand_path))
             if mol is not None:
                 ligand_mols.append(mol)
+                # Filename convention: `ligand_ortho_*` = orthosteric (0), else
+                # allosteric (1). See scripts/allosteric-sites/prepare_orthosteric.py.
+                ligand_site_types.append(0 if "ortho" in ligand_path.name.lower() else 1)
             else:
                 failed_ligands.append(ligand_path.name)
 
@@ -270,8 +276,7 @@ def process_single_complex(complex_path: Path, threshold: float = 4, skip_depth:
         lig_coords = np.concatenate(lig_coords, axis=0)
 
         output_path = complex_path / "binding.npz"
-        np.savez(
-            str(output_path),
+        save_kwargs = dict(
             binding_residues=binding_residues,
             binding_site_centers=binding_site_centers,
             res_coords=res_coords,
@@ -282,6 +287,13 @@ def process_single_complex(complex_path: Path, threshold: float = 4, skip_depth:
             ligand_coords=lig_coords,
             ligand_ids=lig_ids,
         )
+        # Only persist per-site labels for mixed proteins (at least one orthosteric
+        # ligand). For single-class datasets (sc-PDB, ASD-without-ortho) we omit it so
+        # the datamodule's per-dataset `site_type` label applies unchanged.
+        site_types = np.array(ligand_site_types, dtype=np.int64)
+        if (site_types == 0).any():
+            save_kwargs["site_types"] = site_types
+        np.savez(str(output_path), **save_kwargs)
 
         return (True, f"residues={len(res_ids)}, ligands={len(ligand_mols)}")
 

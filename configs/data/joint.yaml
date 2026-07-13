@@ -1,0 +1,16 @@
+defaults:
+  - default
+  - _self_
+
+_target_: src.datasets.joint_dataset.JointBindingDataModule
+
+# sc-PDB + benchmark datasets (coach420/holo4k/pdbbind2020) live here.
+root: ${paths.data_dir}/data
+# ASD dataset lives in a separate tree.
+allosteric_root: ${paths.data_dir}/allosteric-sites
+allosteric_dataset_name: allosteric
+# Suffix of the ASD split id files produced by scripts/allosteric-sites/make_splits.py,
+# e.g. train_ids_allosteric_mmseqs30 / valid_ids_allosteric_mmseqs30 / test_ids_allosteric_mmseqs30.
+split_suffix: mmseqs30
+
+batch_size: 8
