@@ -13,4 +13,9 @@ allosteric_dataset_name: allosteric
 # e.g. train_ids_allosteric_mmseqs30 / valid_ids_allosteric_mmseqs30 / test_ids_allosteric_mmseqs30.
 split_suffix: mmseqs30
 
+# Draw orthosteric (sc-PDB) and allosteric (ASD) samples at ~equal frequency during
+# training so the far larger sc-PDB set does not dominate every batch. Set to false to
+# train on the natural (orthosteric-heavy) mixture instead.
+balance_classes: true
+
 batch_size: 8

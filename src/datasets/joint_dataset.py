@@ -2,7 +2,8 @@ import logging
 from pathlib import Path
 from typing import Literal
 
-from torch.utils.data import ConcatDataset
+import torch
+from torch.utils.data import ConcatDataset, WeightedRandomSampler
 from torch_geometric.loader import DataLoader
 
 from .binding_dataset import BindingDataModule, BindingDataset
@@ -37,12 +38,18 @@ class JointBindingDataModule(BindingDataModule):
         allosteric_root: str,
         split_suffix: str = "mmseqs30",
         allosteric_dataset_name: str = "allosteric",
+        balance_classes: bool = True,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
         self.allosteric_root = Path(allosteric_root)
         self.split_suffix = split_suffix
         self.allosteric_dataset_name = allosteric_dataset_name
+        # sc-PDB dwarfs ASD, so a plain shuffle makes almost every batch orthosteric,
+        # which starves both allosteric localization and the classifier. When enabled,
+        # the training loader draws the two classes at ~equal frequency via inverse-
+        # frequency weights. Validation is left unbalanced (a faithful test distribution).
+        self.balance_classes = balance_classes
 
     # ------------------------------------------------------------------ helpers
 
@@ -99,15 +106,37 @@ class JointBindingDataModule(BindingDataModule):
             site_type=site_type,
         )
 
-    def _wrap_loader(self, dataset, shuffle: bool) -> DataLoader:
+    def _wrap_loader(self, dataset, shuffle: bool, sampler=None) -> DataLoader:
         return DataLoader(
             dataset,
             batch_size=self.batch_size,
-            shuffle=shuffle,
+            # A sampler and shuffle are mutually exclusive in torch's DataLoader.
+            shuffle=shuffle if sampler is None else False,
+            sampler=sampler,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
             prefetch_factor=self.prefetch_factor,
             follow_batch=self.follow_batch,
+        )
+
+    def _balanced_sampler(
+        self, n_ortho: int, n_allo: int
+    ) -> WeightedRandomSampler:
+        """Inverse-frequency sampler over ``ConcatDataset([scpdb, allo])``.
+
+        Each orthosteric sample is weighted ``1/n_ortho`` and each allosteric sample
+        ``1/n_allo``, so in expectation a batch is ~50/50. ``num_samples`` keeps the
+        epoch length equal to the concatenated dataset size; ``replacement=True`` lets
+        the small ASD split be revisited within an epoch.
+        """
+        weights = torch.cat(
+            [
+                torch.full((n_ortho,), 1.0 / max(n_ortho, 1)),
+                torch.full((n_allo,), 1.0 / max(n_allo, 1)),
+            ]
+        )
+        return WeightedRandomSampler(
+            weights, num_samples=n_ortho + n_allo, replacement=True
         )
 
     def _joint_loader(self, mode: Literal["train", "valid"]) -> DataLoader:
@@ -128,9 +157,16 @@ class JointBindingDataModule(BindingDataModule):
             len(scpdb_ds),
             len(allo_ds),
         )
-        return self._wrap_loader(
-            ConcatDataset([scpdb_ds, allo_ds]), shuffle=is_train and self.shuffle
-        )
+        concat = ConcatDataset([scpdb_ds, allo_ds])
+
+        if is_train and self.balance_classes:
+            sampler = self._balanced_sampler(len(scpdb_ds), len(allo_ds))
+            log.info(
+                "Training loader uses class-balanced sampling (~50/50 ortho/allo)."
+            )
+            return self._wrap_loader(concat, shuffle=False, sampler=sampler)
+
+        return self._wrap_loader(concat, shuffle=is_train and self.shuffle)
 
     # ------------------------------------------------------------ dataloaders
 

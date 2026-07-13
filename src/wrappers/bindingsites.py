@@ -189,6 +189,11 @@ class BindingSitesWrapper(WrapperBase):
         self.val_dca_ranked = DCA(threshold=threshold)
         self.val_dcc_rand_ranked = DCC(threshold=threshold)
         self.val_dca_rand_ranked = DCA(threshold=threshold)
+        # Per-class ranked DCC. The joint val set is orthosteric-dominated, so the pooled
+        # val/dcc_ranked mostly reflects sc-PDB; these split it by site type so allosteric
+        # localization can be tracked (and checkpoint-selected) on its own.
+        self.val_dcc_ranked_ortho = DCC(threshold=threshold)
+        self.val_dcc_ranked_allo = DCC(threshold=threshold)
 
     def forward(self, batch: Dict[str, Tensor]) -> Tensor:
         x_atom = batch.x_dict["atom"]
@@ -368,6 +373,31 @@ class BindingSitesWrapper(WrapperBase):
             on_step=False,
             on_epoch=True,
         )
+
+        # Ranked DCC restricted to each site type. Only update/log when the class is
+        # present in the batch, so a single-class run (e.g. sc-PDB only) simply never
+        # emits the metric for the absent class instead of dividing by zero.
+        center_site_types = batch["atom"].bindingsite_site_type
+        center_batch = batch["atom"]["bindingsite_center_batch"]
+        for cls, metric, name in (
+            (0, self.val_dcc_ranked_ortho, "ortho"),
+            (1, self.val_dcc_ranked_allo, "allo"),
+        ):
+            cls_mask = center_site_types == cls
+            if cls_mask.any():
+                metric(
+                    coords_global_nodes=preds_pos_global_node,
+                    coords_bindingsites=binding_site_center[cls_mask],
+                    batch_global_nodes=batch_global_nodes,
+                    batch_bindingsites=center_batch[cls_mask],
+                    global_node_confidence=preds_confidence,
+                )
+                self.log(
+                    f"val/dcc_ranked_{name}",
+                    metric,
+                    on_step=False,
+                    on_epoch=True,
+                )
 
     def predict_step(
         self, batch: Dict[str, Tensor], batch_idx: int, dataloader_idx: int = 0

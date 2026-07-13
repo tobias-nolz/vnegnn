@@ -302,6 +302,20 @@ def evaluate_protein_predictions(
 
     if site_type_filter is not None and "site_types" in binding.files:
         site_types = binding["site_types"]
+        # site_types is per binding site/ligand: it must align 1:1 with the centers and
+        # index cleanly with the per-atom ligand_ids. A mismatch means the extraction
+        # wrote inconsistent arrays; fail loudly rather than silently miscount the
+        # benchmark.
+        if len(site_types) != len(bindingsite_centers):
+            raise ValueError(
+                f"{protein_name}: site_types ({len(site_types)}) misaligned with "
+                f"binding_site_centers ({len(bindingsite_centers)})"
+            )
+        if len(ligand_ids) and int(np.max(ligand_ids)) >= len(site_types):
+            raise ValueError(
+                f"{protein_name}: ligand_ids reference site index "
+                f"{int(np.max(ligand_ids))} but only {len(site_types)} site_types exist"
+            )
         center_mask = site_types == site_type_filter
         atom_mask = site_types[ligand_ids] == site_type_filter
         bindingsite_centers = bindingsite_centers[center_mask]

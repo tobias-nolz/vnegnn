@@ -17,6 +17,14 @@ logger:
 
 tags: ["joint", "allosteric"]
 
+# The primary goal is reliable allosteric localization, and the joint val set is
+# orthosteric-heavy, so select the checkpoint on allosteric ranked DCC rather than the
+# pooled val/dcc_ranked. Switch to val/dcc_ranked (pooled) or val/dcc_ranked_ortho if you
+# want to weight orthosteric retention more.
+callbacks:
+  model_checkpoint:
+    monitor: val/dcc_ranked_allo
+
 trainer:
   max_epochs: 1500
   num_sanity_val_steps: 0
