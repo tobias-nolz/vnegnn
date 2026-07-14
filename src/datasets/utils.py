@@ -177,6 +177,18 @@ def create_hetero_graph(
     if binding_sites is not None:
         data["atom"].y = torch.from_numpy(binding_residues).float()
         data["atom"].bindingsite_center = torch.from_numpy(binding_sites)
+        # A ligand with no protein atoms within the binding threshold yields an
+        # empty-slice mean -> NaN center (see the "Mean of empty slice" warnings in
+        # extract_binding_info). The graph-level NaN check below does not cover
+        # bindingsite_center, and a NaN center silently poisons the position/knn loss,
+        # so reject such proteins here (process() catches this and drops them).
+        if (
+            data["atom"].bindingsite_center.numel() == 0
+            or data["atom"].bindingsite_center.isnan().any()
+        ):
+            raise ValueError(
+                f"Empty or NaN binding-site center for protein {protein_name}"
+            )
         if site_types is not None:
             if len(site_types) != len(binding_sites):
                 raise ValueError(

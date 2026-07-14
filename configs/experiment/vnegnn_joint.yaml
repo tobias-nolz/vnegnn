@@ -30,5 +30,13 @@ trainer:
   num_sanity_val_steps: 0
   log_every_n_steps: 15
   check_val_every_n_epoch: 5
+  # bf16 mixed precision: ~half the activation memory and faster, with
+  # fp32-equivalent dynamic range (no loss scaling / overflow risk). Weights and optimizer
+  # state stay fp32. Sanity-check val/dcc_ranked_* early since the model does E(3)-equivariant
+  # coordinate math
+  precision: bf16-mixed
+  # Effective batch = data.batch_size (8) * accumulate_grad_batches (4) = 32, matching the
+  # upstream VN-EGNN batch size that lr=1e-4 was tuned for.
+  accumulate_grad_batches: 4
 
 scaling_factor: 5.0

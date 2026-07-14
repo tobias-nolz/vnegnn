@@ -19,6 +19,11 @@ except Exception:
 
 
 def calc_group_var(pos: Tensor, index: Tensor) -> Tensor:
+    # Compute in fp32: index_reduce requires the accumulator and source to share a dtype,
+    # which breaks under bf16/fp16 autocast (the pre-allocated `out` and the autocast-cast
+    # source disagree). These variances are diagnostic-only (logged, not part of the loss),
+    # so fp32 is both safe and more numerically stable.
+    pos = pos.float()
     out = pos.new_zeros(int(index.max().item()) + 1, pos.shape[-1])
     means = torch.index_reduce(out, 0, index, pos, "mean", include_self=False)
     means_x2 = torch.index_reduce(out, 0, index, pos**2, "mean", include_self=False)

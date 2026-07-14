@@ -8,6 +8,10 @@ _target_: src.datasets.joint_dataset.JointBindingDataModule
 root: ${paths.data_dir}/data
 # ASD dataset lives in a separate tree.
 allosteric_root: ${paths.data_dir}/allosteric-sites
+# sc-PDB train/valid split name. Falls back to `scpdb` when the global
+# `train_valid_split` is absent (e.g. during eval, where only the test loaders are used),
+# so `+data=joint` works for both `train.py` and `eval.py` without an extra override.
+train_valid_split: ${oc.select:train_valid_split,scpdb}
 allosteric_dataset_name: allosteric
 # Suffix of the ASD split id files produced by scripts/allosteric-sites/make_splits.py,
 # e.g. train_ids_allosteric_mmseqs30 / valid_ids_allosteric_mmseqs30 / test_ids_allosteric_mmseqs30.
@@ -19,3 +23,6 @@ split_suffix: mmseqs30
 balance_classes: true
 
 batch_size: 8
+
+n_jobs: 8
+num_workers: 2
