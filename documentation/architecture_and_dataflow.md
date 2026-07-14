@@ -2,9 +2,11 @@
 
 ## Executive Summary
 
-This codebase implements an evaluation framework for the **VN-EGNN** model, specifically adapted for **allosteric site
-prediction** on the Allosteric Database (ASD) dataset. The project leverages PyTorch Lightning, Hydra for configuration
-management, and provides a complete pipeline from data preparation to model evaluation.
+This codebase adapts the **VN-EGNN** model for **allosteric site prediction** on the Allosteric Database (ASD) dataset.
+Beyond the original zero-shot evaluation framework it now supports **joint orthosteric (sc-PDB) + allosteric (ASD)
+training** and an added **binary head that classifies each predicted site as orthosteric or allosteric**. The project
+leverages PyTorch Lightning and Hydra, and provides a complete pipeline from data preparation through joint training to
+evaluation. The allosteric extension is documented in detail in [allosteric_extension.md](allosteric_extension.md).
 
 ---
 
@@ -85,11 +87,15 @@ The **VN-EGNN** model is an E(n)-equivariant message passing neural network that
 - Takes protein graph representations with node features (ESM embeddings)
 - Uses heterogeneous graph structure with atom nodes and global nodes
 - Applies equivariant message passing layers that preserve E(3) symmetry
-- Outputs binding site predictions with confidence scores
+- Outputs, per global (virtual) node: a binding-site position, a **confidence** score (for
+  ranking), and — in the allosteric extension — an **allosteric-vs-orthosteric class logit**
+  (`classifier_mlp`, giving the 5-tuple forward output)
 
 Key configuration parameters:
 
-- **Input features**: 1301 (ESM embeddings + residue depth)
+- **Input features**: 1301 (21-class residue one-hot + 1280-dim ESM-2 embedding). Note:
+  `res_depths` is stored on the graph but **not** concatenated into the model input, so MSMS
+  can be skipped at preprocessing (`--skip-depth`) with no effect on the model.
 - **Hidden features**: 100
 - **Layers**: 5
 - **Dropout**: 0.1
@@ -177,6 +183,7 @@ The `binding.npz` file is a NumPy compressed archive containing all binding-rela
 | `res_depths`           | `float64` | `(num_residues,)`         | Residue depth from protein surface (via MSMS, can be skipped for standard VN-EGNN) |
 | `ligand_coords`        | `float64` | `(total_ligand_atoms, 3)` | All ligand atom coordinates concatenated                                           |
 | `ligand_ids`           | `int`     | `(total_ligand_atoms,)`   | Ligand index for each atom (0, 1, 2, ...)                                          |
+| `site_types`           | `int`     | `(num_ligands,)`          | **Optional, allosteric extension.** Per-site class: 0 = orthosteric, 1 = allosteric. Only written for mixed proteins (ASD entries augmented with `--extract-orthosteric`); absent for single-class proteins, which fall back to the dataset-level `site_type`. |
 
 #### 2.2.2 Generation Process
 
@@ -239,7 +246,7 @@ def process_protein(path: Path):
 |--------------------------------|-------------------------------------------------------|
 | `res_coords`                   | Node positions in the graph (CA atoms)                |
 | `res_names`                    | One-hot encoded as part of node features (21 classes) |
-| `res_depths`                   | Appended to node features (1 dimension)               |
+| `res_depths`                   | Stored on the graph but **not** used as a model feature (MSMS skippable) |
 | `binding_residues`             | **Training target** - segmentation loss               |
 | `binding_site_centers`         | **Training target** - position prediction loss        |
 | `ligand_coords` + `ligand_ids` | **Evaluation** - DCA metric calculation               |
@@ -387,6 +394,7 @@ backbone:
 │  ├── atom.x         ← one_hot(res_names) + residue_embeddings + res_depths  │
 │  ├── atom.y         ← binding_residues (training target)                    │
 │  ├── atom.bindingsite_center ← binding_site_centers                         │
+│  ├── atom.bindingsite_site_type ← site_types (0=ortho,1=allo; ext.)         │
 │  ├── global_node.x    ← mean(residue_embeddings)                            │
 │  ├── global_node.pos  ← fibonacci_grid(centroid, radius)                    │
 │  ├── ligand.ligand_coords  ← ligand_coords (for DCA metric)                 │
@@ -400,11 +408,16 @@ backbone:
 │  Training:                                                                  │
 │  ├── Segmentation loss: atom.y (binding_residues)                           │
 │  ├── Position loss: atom.bindingsite_center                                 │
-│  └── Confidence loss: predicted confidence scores                           │
+│  ├── Confidence loss: predicted confidence scores                           │
+│  └── Classification loss (ext.): BCE on class logit vs nearest-center       │
+│      site_type (per virtual node)                                           │
 │                                                                             │
 │  Evaluation:                                                                │
 │  ├── DCA: distance(predicted_pos, ligand_coords) ≤ threshold                │
-│  └── DCC: distance(predicted_pos, binding_site_centers) ≤ threshold         │
+│  ├── DCC: distance(predicted_pos, binding_site_centers) ≤ threshold         │
+│  │        (joint run also logs per-class val/dcc_ranked_{ortho,allo})       │
+│  └── Classifier (ext.): allosteric_prob per site; detection-conditioned     │
+│      classifier/auroc_detected over found pockets                           │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -486,7 +499,15 @@ class AllostericDataModule(BindingDataModule):
 ```
 
 This seamlessly integrates with the existing training/evaluation pipeline while maintaining the same graph construction
-and data loading infrastructure.
+and data loading infrastructure. It is used for the **allosteric-only** zero-shot / fine-tuned evaluation
+(`+data=allosteric`).
+
+For the allosteric extension, `JointBindingDataModule` (`configs/data/joint.yaml`, `+data=joint` /
+`experiment=vnegnn_joint`) additionally combines sc-PDB (orthosteric, `site_type=0`) and the ASD training split
+(allosteric, `site_type=1`) into one loader. Because sc-PDB vastly outnumbers ASD, training uses a class-balanced
+`WeightedRandomSampler` (`balance_classes: true`) so batches are ~50/50; its test set is the three orthosteric
+benchmarks plus the held-out ASD split, which is what makes the pooled `classifier/auroc_detected` a genuine binary
+discrimination number. See [allosteric_extension.md](allosteric_extension.md).
 
 ---
 
