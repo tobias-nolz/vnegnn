@@ -97,7 +97,8 @@ mmseqs version
 
 # Data
 
-For more information on the Allosteric Database (ASD) dataset, please refer to the [ASD Infos](documentation/ASD_information.md) file.
+For more information on the Allosteric Database (ASD) dataset, please refer to
+the [ASD Infos](documentation/ASD_information.md) file.
 
 ## Setup Data
 
@@ -120,19 +121,19 @@ For more information on the Allosteric Database (ASD) dataset, please refer to t
     [--verbose]
    ```
 
-   | Argument                    | Short | Type   | Required | Default                            | Description                                                                                                     |
-          |-----------------------------|-------|--------|----------|------------------------------------|-----------------------------------------------------------------------------------------------------------------|
-   | `--asd-file`                | `-a`  | `str`  | ✅ Yes    | —                                  | Path to ASD dataset file (CSV/TSV) containing columns `allosteric_pdb`, `modulator_chain`, and `modulator_resi` |
-   | `--output-dir`              | `-o`  | `str`  | ❌ No     | `data/allosteric-sites/allosteric` | Directory where allosteric-site data will be stored.                                                            |
-   | `--jobs`                    | `-j`  | `int`  | ❌ No     | `1`                                | Number of parallel workers                                                                                      |
-   | `--force-ligand-extraction` | `-f`  | `flag` | ❌ No     | `False`                            | Force re-extraction of ligand files even if they already exist                                                  |
-   | `--clear-existing-pdb`      | —     | `flag` | ❌ No     | `False`                            | Clear existing PDB files before downloading new ones                                                            |
-   | `--max-diff`                | `-m`  | `int`  | ❌ No     | `0`                                | Maximum residue ID difference for fuzzy matching (0 = exact only, 2 = allow ±2)                                 |
-   | `--exclude-ids`             | `-e`  | `str`  | ❌ No     | `None`                             | Path to file(s) with PDB IDs to exclude (can be specified multiple times)                                       |
-   | `--only-lig`                | —     | `flag` | ❌ No     | `False`                            | Only use rows where `modulator_class='Lig'`                                                                     |
-   | `--extract-orthosteric`     | —     | `flag` | ❌ No     | `False`                            | Also harvest non-modulator, drug-like co-crystallized ligands as **orthosteric** (class 0) sites, so a protein carries both classes. Required for the classification head to be meaningful (heuristic — see [allosteric_extension.md](documentation/allosteric_extension.md)). |
-   | `--ortho-min-heavy-atoms`   | —     | `int`  | ❌ No     | `6`                                | Minimum heavy-atom count for a ligand to qualify as an orthosteric candidate (filters ions/buffers)            |
-   | `--verbose`                 | `-v`  | `flag` | ❌ No     | `False`                            | Enable verbose logging                                                                                          |
+   | Argument                    | Short | Type   | Required  | Default                            | Description                                                                                                     |
+   |-----------------------------|-------|--------|-----------|------------------------------------|-----------------------------------------------------------------------------------------------------------------|
+   | `--asd-file`                | `-a`  | `str`  | ✅ Yes     | —                                  | Path to ASD dataset file (CSV/TSV) containing columns `allosteric_pdb`, `modulator_chain`, and `modulator_resi` |
+   | `--output-dir`              | `-o`  | `str`  | ❌ No      | `data/allosteric-sites/allosteric` | Directory where allosteric-site data will be stored                                                             |
+   | `--jobs`                    | `-j`  | `int`  | ❌ No      | `1`                                | Number of parallel workers                                                                                      |
+   | `--force-ligand-extraction` | `-f`  | `flag` | ❌ No      | `False`                            | Force re-extraction of ligand files even if they already exist                                                  |
+   | `--clear-existing-pdb`      | —     | `flag` | ❌ No      | `False`                            | Clear existing PDB files before downloading new ones                                                            |
+   | `--max-diff`                | `-m`  | `int`  | ❌ No      | `0`                                | Maximum residue ID difference for fuzzy matching (0 = exact only, 2 = allow ±2)                                 |
+   | `--exclude-ids`             | `-e`  | `str`  | ❌ No      | `None`                             | Path to file(s) with PDB IDs to exclude (can be specified multiple times)                                       |
+   | `--only-lig`                | —     | `flag` | ❌ No      | `False`                            | Only use rows where `modulator_class='Lig'`                                                                     |
+   | `--extract-orthosteric`     | —     | `flag` | ❌ No      | `False`                            | Also harvest non-modulator, drug-like co-crystallized ligands as **orthosteric** (class 0) sites                |
+   | `--ortho-min-heavy-atoms`   | —     | `int`  | ❌ No      | `6`                                | Minimum heavy-atom count for a ligand to qualify as an orthosteric candidate (filters ions/buffers)             |
+   | `--verbose`                 | `-v`  | `flag` | ❌ No      | `False`                            | Enable verbose logging                                                                                          |
 
    **Preventing Data Leakage:** To ensure fair evaluation, use `--exclude-ids` to exclude PDBs used during training and
    validation:
@@ -262,33 +263,7 @@ This is the main extension: train VN-EGNN jointly on sc-PDB (orthosteric) and th
 training split (allosteric), with the added head classifying each predicted site. The full,
 ordered pipeline (data setup → feature extraction → split → train → eval → P2Rank baseline)
 is documented in [commands.md](documentation/commands.md); the design and the list of
-changed files are in [allosteric_extension.md](documentation/allosteric_extension.md). The
-key steps:
-
-```bash
-# 1. Data setup with orthosteric augmentation (so proteins carry both classes)
-python scripts/allosteric-sites/setup_data.py \
-  --asd-file path/to/ASD_Release_xxxx_AS.txt \
-  --exclude-ids data/data/sc-pdb/splits/train_ids_scpdb \
-  --exclude-ids data/data/sc-pdb/splits/valid_ids_scpdb \
-  --only-lig --jobs 32 --extract-orthosteric --ortho-min-heavy-atoms 6
-# 2. Feature extraction (ESM embeddings + binding.npz incl. per-site site_types)
-python scripts/process_data.py --data-dir data/allosteric-sites/allosteric \
-  --jobs 32 --device cuda --batch 128 --skip-depth
-# 3. Leakage-free sequence-identity split (requires mmseqs on PATH)
-python scripts/allosteric-sites/make_splits.py \
-  --asd-dir data/allosteric-sites/allosteric --scpdb-dir data/data/sc-pdb \
-  --min-seq-id 0.3 --coverage 0.8 --ratios 0.5 0.25 0.25 --suffix mmseqs30 --jobs 32
-# 4. Joint training (bf16, class-balanced sampling, checkpoint on val/dcc_ranked_allo)
-PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
-python src/train.py experiment=vnegnn_joint
-# 5. Full evaluation: localization on all test sets + orthosteric/allosteric classifier AUROC
-python src/eval.py +data=joint wandb_run_id=[RUN_ID]
-```
-
-Because ~2/3 of ASD proteins are sequence-homologous to sc-PDB (and are confined to the
-training fold to avoid leakage), the allosteric valid/test folds are a fraction of the
-eligible pool — hence the higher `--ratios` for valid/test above.
+changed files are in [allosteric_extension.md](documentation/allosteric_extension.md).
 
 # Project structure
 
