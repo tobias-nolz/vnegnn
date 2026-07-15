@@ -46,9 +46,16 @@ class JointBindingDataModule(BindingDataModule):
         self.split_suffix = split_suffix
         self.allosteric_dataset_name = allosteric_dataset_name
         # sc-PDB dwarfs ASD, so a plain shuffle makes almost every batch orthosteric,
-        # which starves both allosteric localization and the classifier. When enabled,
-        # the training loader draws the two classes at ~equal frequency via inverse-
-        # frequency weights. Validation is left unbalanced (a faithful test distribution).
+        # which starves allosteric localization. When enabled, the training loader draws
+        # the two *datasets* at ~equal frequency via inverse-frequency weights.
+        # Validation is left unbalanced (a faithful test distribution).
+        #
+        # Note this balances dataset membership, not the classifier's target. Since
+        # prepare_orthosteric.py annotates ASD proteins with their orthosteric pockets
+        # too, an ASD protein is mixed (~47.5% of its centers are allosteric on average),
+        # so a 50/50 dataset draw yields a per-virtual-node target that is only ~24%
+        # allosteric. The residual imbalance is handled by the BCE `pos_weight` in
+        # configs/model/vnegnn.yaml, not here.
         self.balance_classes = balance_classes
 
     # ------------------------------------------------------------------ helpers
@@ -117,6 +124,9 @@ class JointBindingDataModule(BindingDataModule):
             pin_memory=self.pin_memory,
             prefetch_factor=self.prefetch_factor,
             follow_batch=self.follow_batch,
+            # Without this the workers are torn down and re-forked from a ~23 GB parent
+            # every epoch. torch rejects persistent workers when there are none.
+            persistent_workers=self.persistent_workers and self.num_workers > 0,
         )
 
     def _balanced_sampler(
@@ -124,10 +134,14 @@ class JointBindingDataModule(BindingDataModule):
     ) -> WeightedRandomSampler:
         """Inverse-frequency sampler over ``ConcatDataset([scpdb, allo])``.
 
-        Each orthosteric sample is weighted ``1/n_ortho`` and each allosteric sample
-        ``1/n_allo``, so in expectation a batch is ~50/50. ``num_samples`` keeps the
-        epoch length equal to the concatenated dataset size; ``replacement=True`` lets
+        Each sc-PDB sample is weighted ``1/n_ortho`` and each ASD sample ``1/n_allo``, so
+        in expectation half of each batch comes from each *dataset*. ``num_samples`` keeps
+        the epoch length equal to the concatenated dataset size; ``replacement=True`` lets
         the small ASD split be revisited within an epoch.
+
+        This is a dataset-level balance, not a class-level one -- ASD proteins carry
+        orthosteric centers as well, so the resulting per-virtual-node class balance is
+        roughly 76/24 ortho/allo rather than 50/50. See ``balance_classes`` in __init__.
         """
         weights = torch.cat(
             [

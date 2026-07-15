@@ -16,13 +16,28 @@ loss:
     _target_: src.modules.losses.ConfidenceLoss
   segmentation_loss:
     _target_: src.modules.losses.DiceLoss
-  # Binary orthosteric(0)/allosteric(1) head. For class imbalance pass a
-  # pos_weight, e.g. add `pos_weight: {_target_: torch.tensor, data: [2.0]}`.
+  # Binary orthosteric(0)/allosteric(1) head. Each virtual node is labelled with the site
+  # type of its nearest center, and under the joint datamodule's balanced sampling that
+  # target lands at roughly 76/24 ortho/allo (half the proteins are sc-PDB and thus
+  # all-orthosteric; the ASD half averages ~47.5% allosteric centers). pos_weight
+  # (1-p)/p ~= 3.2 restores a balanced effective prior so the 0.5 decision threshold is
+  # meaningful. Set to null to train on the natural prior instead - AUROC is invariant
+  # to this, but accuracy/F1 at a fixed threshold are not.
   classification_loss:
     _target_: torch.nn.BCEWithLogitsLoss
+    pos_weight:
+      _target_: torch.tensor
+      data: [3.2]
   confidence_loss_weight: 1.0
   segmentation_loss_weight: 1.0
-  classification_loss_weight: 1.0
+  # 0.5 compensates for pos_weight inflating the *magnitude* of class_loss (~2.05x:
+  # train 0.30 -> 0.62 over a matched 50-epoch A/B). classifier_mlp and confidence_mlp
+  # both read x_global_node, so an uncompensated pos_weight doubles classification's
+  # share of the multi-task sum and crowds out the confidence module: rank-0 DCC/DCA
+  # fell 14.8% on average across all four test sets while rank-7 (which does not use
+  # the ranking) rose, and val/confidence_var collapsed by 42%. pos_weight's class
+  # rebalancing is kept -- that is what lifted classifier AUROC 0.626 -> 0.685.
+  classification_loss_weight: 0.5
   # Each virtual node is labelled with the site type of its nearest annotated center.
   # Set to e.g. 8.0 to only train/evaluate the classifier on virtual nodes within that
   # many Angstrom of a real site (foreground); null supervises every virtual node.

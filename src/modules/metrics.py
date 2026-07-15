@@ -114,7 +114,17 @@ class DCC(Metric):
         batch_global_nodes: torch.Tensor,
         batch_bindingsites: torch.Tensor,
         global_node_confidence: torch.Tensor = None,
+        site_mask: torch.Tensor = None,
     ):
+        """Accumulate DCC over a batch.
+
+        Args:
+            site_mask: Optional boolean mask over `coords_bindingsites` selecting which
+                centers to score. The top-n ranking budget is still derived from *all* of
+                a protein's centers, so a class-restricted DCC stays comparable to the
+                pooled one: narrowing which sites we score must not also shrink the number
+                of predictions the model is allowed to make.
+        """
         if global_node_confidence is not None:
             unique, counts = batch_bindingsites.unique(return_counts=True)
             for un, co in zip(unique, counts):
@@ -124,12 +134,17 @@ class DCC(Metric):
                 sample_coords_global_nodes = coords_global_nodes[
                     un == batch_global_nodes
                 ]
-                sample_coords_binding_sites = coords_bindingsites[
-                    un == batch_bindingsites
-                ]
+                center_mask = un == batch_bindingsites
+                if site_mask is not None:
+                    center_mask = center_mask & site_mask
+                    if not center_mask.any():
+                        continue
+                sample_coords_binding_sites = coords_bindingsites[center_mask]
 
                 # TODO: Not good if we have 8 nodes and n=10, we are worser than
                 # we could be.
+                # `co` counts every center of this protein, including ones masked out of
+                # scoring above -- that is the rank-n budget the model is judged on.
                 to_select = min(co + self.n, sample_conf_global_nodes.shape[0])
 
                 top_k = torch.topk(sample_conf_global_nodes.squeeze(), k=to_select)[1]
@@ -144,9 +159,17 @@ class DCC(Metric):
                     - top_k_coords[assign_index[1]],
                     dim=-1,
                 )
-                self.correct += (dists <= self.threshold).any(dim=-1).sum()
-                self.total += co
+                # One count per center, matching the unranked branch below, DCA's
+                # per-ligand loop, and eval.py's evaluate_protein_predictions. Reducing
+                # with .any() here would score a whole protein as a single hit while
+                # still dividing by its center count.
+                self.correct += (dists <= self.threshold).sum()
+                self.total += center_mask.sum()
         else:
+            if site_mask is not None:
+                coords_bindingsites = coords_bindingsites[site_mask]
+                batch_bindingsites = batch_bindingsites[site_mask]
+
             x = coords_global_nodes.float()
             y = coords_bindingsites.float()
             x_batch = batch_global_nodes

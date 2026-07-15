@@ -377,6 +377,10 @@ class BindingSitesWrapper(WrapperBase):
         # Ranked DCC restricted to each site type. Only update/log when the class is
         # present in the batch, so a single-class run (e.g. sc-PDB only) simply never
         # emits the metric for the absent class instead of dividing by zero.
+        # The full center set is passed and the class is selected via `site_mask`: the
+        # rank-n budget must stay the protein's total site count, otherwise a mixed
+        # protein with one allosteric and five orthosteric sites would be scored on its
+        # top-1 prediction alone and the metric would not be comparable to the pooled one.
         center_site_types = batch["atom"].bindingsite_site_type
         center_batch = batch["atom"]["bindingsite_center_batch"]
         for cls, metric, name in (
@@ -387,10 +391,11 @@ class BindingSitesWrapper(WrapperBase):
             if cls_mask.any():
                 metric(
                     coords_global_nodes=preds_pos_global_node,
-                    coords_bindingsites=binding_site_center[cls_mask],
+                    coords_bindingsites=binding_site_center,
                     batch_global_nodes=batch_global_nodes,
-                    batch_bindingsites=center_batch[cls_mask],
+                    batch_bindingsites=center_batch,
                     global_node_confidence=preds_confidence,
+                    site_mask=cls_mask,
                 )
                 self.log(
                     f"val/dcc_ranked_{name}",

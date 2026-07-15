@@ -22,7 +22,7 @@ split_suffix: mmseqs30
 # train on the natural (orthosteric-heavy) mixture instead.
 balance_classes: true
 
-batch_size: 8
+batch_size: 16
 
 n_jobs: 8
 num_workers: 2
