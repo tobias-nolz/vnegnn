@@ -8,7 +8,7 @@ from torch import Tensor, nn
 from torch_geometric.nn.pool import knn
 from torchmetrics import AUROC, Accuracy, JaccardIndex
 
-from src.modules.losses import ConfidenceLoss, DiceLoss
+from src.modules.losses import ConfidenceLoss, ConfidenceRankingLoss, DiceLoss
 from src.modules.metrics import DCA, DCC
 from src.utils.misc import calc_group_var, multi_predictions
 from src.wrappers.base import WrapperBase
@@ -22,10 +22,12 @@ class BindingSitesLoss(nn.Module):
         segmentation_loss: nn.Module = DiceLoss(),
         global_node_pos_loss: nn.Module = nn.HuberLoss(),
         confidence_loss: nn.Module = ConfidenceLoss(),
+        ranking_loss: nn.Module = None,
         classification_loss: nn.Module = None,
         segmentation_loss_weight: float = 1.0,
         global_node_pos_loss_weight: float = 1.0,
         confidence_loss_weight: float = 1.0,
+        ranking_loss_weight: float = 0.0,
         classification_loss_weight: float = 1.0,
         classification_foreground_dist: float = None,
     ):
@@ -33,6 +35,12 @@ class BindingSitesLoss(nn.Module):
         self.segmentation_loss = segmentation_loss
         self.global_node_pos_loss = global_node_pos_loss
         self.confidence_loss = confidence_loss
+        # Optional listwise ranking loss on the confidence output (see
+        # ConfidenceRankingLoss). It sharpens the per-protein ordering of virtual nodes,
+        # which is what rank-0 DCC/DCA read; leave the weight at 0 to disable it and
+        # recover the pre-ranking-head behaviour exactly.
+        self.ranking_loss = ranking_loss
+        self.ranking_loss_weight = ranking_loss_weight
         # Binary head supervising orthosteric (0) vs allosteric (1) sites. Default to
         # BCEWithLogitsLoss; a config may pass one with a `pos_weight` for imbalance.
         self.classification_loss = (
@@ -91,6 +99,13 @@ class BindingSitesLoss(nn.Module):
             preds_confidence.squeeze(),
         )
 
+        if self.ranking_loss is not None and self.ranking_loss_weight > 0:
+            ranking_loss = self.ranking_loss(
+                preds_confidence.squeeze(), dists_confidence, x_batch
+            )
+        else:
+            ranking_loss = confidence_loss.new_zeros(())
+
         # Per-virtual-node classification target: label each virtual node with the site
         # type (0 = orthosteric, 1 = allosteric) of its NEAREST annotated site center,
         # rather than broadcasting one protein-level label. `confidence_assign_index`
@@ -119,11 +134,13 @@ class BindingSitesLoss(nn.Module):
             "pos_var": pos_var,
             "seg_loss": seg_loss,
             "confidence_loss": confidence_loss,
+            "ranking_loss": ranking_loss,
             "confidence_var": conf_var,
             "class_loss": class_loss,
             "loss": global_node_pos_loss * self.global_node_pos_loss_weight
             + seg_loss * self.segmentation_loss_weight
             + confidence_loss * self.confidence_loss_weight
+            + ranking_loss * self.ranking_loss_weight
             + class_loss * self.classification_loss_weight,
         }
 
@@ -194,6 +211,10 @@ class BindingSitesWrapper(WrapperBase):
         # localization can be tracked (and checkpoint-selected) on its own.
         self.val_dcc_ranked_ortho = DCC(threshold=threshold)
         self.val_dcc_ranked_allo = DCC(threshold=threshold)
+
+        self.register_buffer(
+            "_selection_metric_ema", torch.tensor(float("nan")), persistent=True
+        )
 
     def forward(self, batch: Dict[str, Tensor]) -> Tensor:
         x_atom = batch.x_dict["atom"]
@@ -276,9 +297,10 @@ class BindingSitesWrapper(WrapperBase):
                 self.val_class_metrics(
                     preds_class_flat[foreground], class_target[foreground]
                 )
+                self.log_dict(self.val_class_metrics, on_step=False, on_epoch=True)
         else:
             self.val_class_metrics(preds_class_flat, class_target)
-        self.log_dict(self.val_class_metrics, on_step=False, on_epoch=True)
+            self.log_dict(self.val_class_metrics, on_step=False, on_epoch=True)
 
         # Detection-conditioned classifier metric: only virtual nodes that actually
         # landed on a true site (within the DCC threshold) count.
@@ -403,6 +425,38 @@ class BindingSitesWrapper(WrapperBase):
                     on_step=False,
                     on_epoch=True,
                 )
+
+    def on_validation_epoch_end(self) -> None:
+        """Log an EMA-smoothed `val/dcc_ranked` for checkpointing / early stopping.
+
+        The DCC state is read directly (`correct`/`total`) rather than via `compute()`
+        so this does not interfere with the torchmetrics compute/reset cycle Lightning
+        drives for the `self.log(..., metric_object)` calls in `validation_step`.
+
+        The EMA lags the raw metric by roughly `1/decay` validations, so the selected
+        checkpoint trails the true optimum slightly -- a much cheaper error than
+        selecting a single-epoch spike.
+        """
+        total = self.val_dcc_ranked.total
+        if total == 0:
+            return
+        value = self.val_dcc_ranked.correct.float() / total
+
+        decay = self.hparams.get("selection_metric_ema_decay", 0.3)
+        if torch.isnan(self._selection_metric_ema):
+            self._selection_metric_ema.fill_(value.item())
+        else:
+            self._selection_metric_ema.fill_(
+                decay * value.item() + (1.0 - decay) * self._selection_metric_ema.item()
+            )
+
+        self.log(
+            "val/dcc_ranked_ema",
+            self._selection_metric_ema.clone(),
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
+        )
 
     def predict_step(
         self, batch: Dict[str, Tensor], batch_idx: int, dataloader_idx: int = 0

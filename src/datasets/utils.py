@@ -129,6 +129,58 @@ class GraphInfo:
     neigh_dist_cutoff: float
 
 
+def validate_graph_integrity(data: HeteroData, protein_name: str) -> None:
+    """Assert the stored graph can be indexed safely on the GPU.
+
+    A single out-of-range index in an ``edge_index`` (or in ``ligand_ids``) does not fail
+    on CPU at build time but triggers an asynchronous ``illegal memory access`` deep inside
+    a scatter/gather kernel during training -- surfacing at an unrelated ``batch_to_device``
+    call and killing the whole run. Catching it here, once, means ``process()`` drops the
+    offending protein instead. Cheap (a handful of ``min``/``max`` reductions per graph).
+
+    Raises ValueError on any violation; ``process_protein`` turns that into a dropped
+    protein recorded in ``not_parsable_<label>.txt``.
+    """
+    num_atom = data["atom"].num_nodes
+    num_global = data["global_node"].pos.shape[0]
+
+    def _check_edges(edge_type, n_src, n_dst):
+        if edge_type not in data.edge_types:
+            return
+        ei = data[edge_type].edge_index
+        if ei.numel() == 0:
+            return
+        if int(ei[0].max()) >= n_src or int(ei[0].min()) < 0:
+            raise ValueError(
+                f"{protein_name}: {edge_type} src index out of range "
+                f"[0,{n_src}) -> [{int(ei[0].min())},{int(ei[0].max())}]"
+            )
+        if int(ei[1].max()) >= n_dst or int(ei[1].min()) < 0:
+            raise ValueError(
+                f"{protein_name}: {edge_type} dst index out of range "
+                f"[0,{n_dst}) -> [{int(ei[1].min())},{int(ei[1].max())}]"
+            )
+
+    _check_edges(("atom", "to", "atom"), num_atom, num_atom)
+    _check_edges(("atom", "to", "global_node"), num_atom, num_global)
+    _check_edges(("global_node", "to", "atom"), num_global, num_atom)
+
+    if "ligand" in data.node_types and "ligand_ids" in data["ligand"]:
+        ligand_ids = data["ligand"].ligand_ids
+        num_centers = data["atom"].bindingsite_center.shape[0]
+        if ligand_ids.numel() > 0:
+            if int(ligand_ids.max()) >= num_centers or int(ligand_ids.min()) < 0:
+                raise ValueError(
+                    f"{protein_name}: ligand_ids out of range for {num_centers} "
+                    f"center(s) -> [{int(ligand_ids.min())},{int(ligand_ids.max())}]"
+                )
+            if len(ligand_ids) != len(data["ligand"].ligand_coords):
+                raise ValueError(
+                    f"{protein_name}: ligand_ids ({len(ligand_ids)}) and ligand_coords "
+                    f"({len(data['ligand'].ligand_coords)}) are misaligned"
+                )
+
+
 def create_hetero_graph(
     protein_name: str,
     coords: npt.NDArray,
@@ -279,6 +331,8 @@ def create_hetero_graph(
 #        or data["atom"].res_depths.isnan().any()  # res_depths are not used in the default VN-EGNN setup and can be skipped (also in pre-processing) to save msms runtime (high impact!)
     ):
         raise ValueError("Nans in the graph with protein name: %s", protein_name)
+
+    validate_graph_integrity(data, protein_name)
 
     data.protein_name = protein_name
     data.resnames = res_names

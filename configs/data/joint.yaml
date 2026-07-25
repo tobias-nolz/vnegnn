@@ -22,7 +22,31 @@ split_suffix: mmseqs30
 # train on the natural (orthosteric-heavy) mixture instead.
 balance_classes: true
 
-batch_size: 16
+# How the mass inside each half is spread (only used when balance_classes is true):
+#   dataset - uniform over proteins (the original scheme)
+#   cluster - uniform over MMseqs sequence clusters
+sampling: cluster
+
+# mmseqs `*_cluster.tsv` used by sampling=cluster. null resolves to
+# <allosteric_root>/<allosteric_dataset_name>/splits/_mmseqs/cluster_cluster.tsv, which
+# make_splits.py writes covering both the ASD and the sc-PDB training sequences.
+cluster_tsv: null
+
+# Binding sites whose center is further than this (Angstrom) from any parsed residue are
+# dropped at graph-build time and excluded from the benchmark.
+max_center_dist: 8.0
+
+# Reduce each multimeric ASD protein to the single chain hosting its allosteric
+# pocket before graph build. The host chain is derived from the annotated modulator
+# ligand's residue contacts (ground truth, never model output); symmetry-replicated pocket
+# copies on other chains fall away, restoring sc-PDB-like single-chain geometry.
+#   - Applies to ASD train/valid/test only; sc-PDB and coach420/holo4k/pdbbind are already
+#     single-chain and untouched, so their reported numbers stay comparable to prior work.
+#   - Changes the ASD denominator (proteins/sites evaluated), so post-filter ASD metrics are
+#     NOT comparable to pre-filter ASD numbers
+single_chain_allosteric: false
+
+batch_size: 8
 
 n_jobs: 8
 num_workers: 2

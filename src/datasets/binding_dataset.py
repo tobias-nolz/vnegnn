@@ -27,6 +27,179 @@ TEST_DATALOADER_INDICES = {
     "sc-pdb": 3,
 }
 
+DEFAULT_MAX_CENTER_DIST = 8.0
+DEFAULT_HOST_CONTACT_DIST = 10.0
+
+
+def _apply_site_keep_mask(
+    keep: np.ndarray,
+    binding_sites: np.ndarray,
+    ligand_coords: np.ndarray,
+    ligand_ids: np.ndarray,
+    site_types: np.ndarray | None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
+    """Keep the sites flagged by boolean ``keep`` (one entry per site), renumbering
+    ``ligand_ids`` to stay contiguous 0..k-1 indices into the survivors and dropping the
+    ligand atoms of removed sites. Shared by ``drop_unreachable_sites`` and
+    ``select_single_chain`` so the renumbering logic lives in one place.
+    """
+    # Old site index -> new index; -1 marks a dropped site.
+    remap = np.full(len(keep), -1, dtype=np.int64)
+    remap[keep] = np.arange(int(keep.sum()))
+
+    atom_keep = keep[ligand_ids]
+    ligand_coords = ligand_coords[atom_keep]
+    ligand_ids = remap[ligand_ids[atom_keep]]
+    binding_sites = binding_sites[keep]
+    if site_types is not None:
+        site_types = np.asarray(site_types)[keep]
+    return binding_sites, ligand_coords, ligand_ids, site_types
+
+
+def drop_unreachable_sites(
+    protein_name: str,
+    coords: np.ndarray,
+    binding_sites: np.ndarray,
+    ligand_coords: np.ndarray,
+    ligand_ids: np.ndarray,
+    site_types: np.ndarray | None,
+    max_center_dist: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
+    """Remove binding sites whose center lies further than `max_center_dist` from the
+    protein, renumbering `ligand_ids` so they stay contiguous indices into the sites.
+
+    NaN centers (a ligand with no protein atom inside the binding threshold, which
+    extract_binding_info turns into a mean over an empty slice) fail the comparison and
+    are dropped here too. That is a deliberate upgrade: `create_hetero_graph` rejects the
+    *whole protein* if any center is NaN, which cost 44 ASD training, 15 validation and 5
+    test proteins over a handful of bad sites each -- none of them all-NaN.
+
+    Returns the filtered ``(binding_sites, ligand_coords, ligand_ids, site_types)``.
+    Raises if nothing survives, which `process()` turns into a dropped protein.
+    """
+    if binding_sites is None or len(binding_sites) == 0:
+        return binding_sites, ligand_coords, ligand_ids, site_types
+
+    dists = np.linalg.norm(
+        binding_sites[:, None, :] - coords[None, :, :], axis=-1
+    ).min(axis=1)
+    # `nan <= x` is False, so NaN centers land in the dropped set.
+    keep = dists <= max_center_dist
+    if keep.all():
+        return binding_sites, ligand_coords, ligand_ids, site_types
+
+    n_nan = int(np.isnan(dists).sum())
+    if not keep.any():
+        raise ValueError(
+            f"All {len(binding_sites)} binding-site centers of {protein_name} are "
+            f"unusable ({n_nan} NaN, rest >{max_center_dist} A from the parsed "
+            f"structure, min {np.nanmin(dists):.1f} A) -- the annotation does not "
+            f"match res_coords."
+        )
+
+    log.warning(
+        "%s: dropping %d/%d binding site(s) -- %d NaN, %d further than %.1f A from any "
+        "residue (furthest %.1f A)",
+        protein_name,
+        int((~keep).sum()),
+        len(keep),
+        n_nan,
+        int((~keep).sum()) - n_nan,
+        max_center_dist,
+        float(np.nanmax(dists)),
+    )
+
+    return _apply_site_keep_mask(
+        keep, binding_sites, ligand_coords, ligand_ids, site_types
+    )
+
+
+def _site_host_chains(
+    coords: np.ndarray,
+    chains: np.ndarray,
+    ligand_coords: np.ndarray,
+    ligand_ids: np.ndarray,
+    n_sites: int,
+    host_contact_dist: float,
+) -> tuple[list[str], np.ndarray]:
+    """For each of the ``n_sites`` sites, the chain that contributes the most CA residues
+    within ``host_contact_dist`` of that site's ligand atoms (its 'host'), plus that contact
+    count. Ties resolve to the lexicographically smallest chain id (``np.unique`` sorts),
+    so the choice is deterministic. Sites whose ligand has no CA within reach fall back to
+    the chain of the single nearest CA; a site with no ligand atoms at all gets host "" (an
+    id no real chain carries), which makes it droppable. Indexing by site id (not by
+    ``unique(ligand_ids)``) keeps ``hosts``/``counts`` aligned with ``binding_sites``.
+    """
+    hosts: list[str] = []
+    counts = np.zeros(n_sites, dtype=np.int64)
+    for i in range(n_sites):
+        latoms = ligand_coords[ligand_ids == i]
+        if latoms.size == 0:
+            hosts.append("")  # empty id matches no real chain -> site is droppable
+            continue
+        nearest = np.linalg.norm(
+            coords[:, None, :] - latoms[None, :, :], axis=-1
+        ).min(axis=1)
+        contact = nearest <= host_contact_dist
+        if contact.any():
+            uniq, cnt = np.unique(chains[contact], return_counts=True)
+            hosts.append(str(uniq[int(np.argmax(cnt))]))
+            counts[i] = int(cnt.max())
+        else:
+            hosts.append(str(chains[int(np.argmin(nearest))]))
+            counts[i] = 1
+    return hosts, counts
+
+
+def select_single_chain(
+    protein_name: str,
+    coords: np.ndarray,
+    chains: np.ndarray,
+    binding_sites: np.ndarray,
+    ligand_coords: np.ndarray,
+    ligand_ids: np.ndarray,
+    site_types: np.ndarray | None,
+    host_contact_dist: float = DEFAULT_HOST_CONTACT_DIST,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Restrict a (possibly multimeric) ASD protein to the single chain that hosts its
+    allosteric pocket.
+
+    The deposited ASD structure is the full assembly (median 723 residues, 76%
+    multi-chain), which spreads the fixed K=8 virtual nodes over a huge Fibonacci sphere
+    and, for homo-multimers, replicates the same pocket on every protomer. This picks the
+    chain hosting the best-resolved *allosteric* site -- ground truth, derived from the
+    annotated modulator ligand's residue contacts, never from model output -- keeps only
+    that chain, and keeps only the sites hosted by it. Symmetry-replicated copies on other
+    chains fall away, restoring sc-PDB-like single-chain / single-pocket-region geometry.
+
+    Returns ``(residue_keep, site_keep)`` boolean masks over ``coords`` and the sites. The
+    caller subsets the per-residue arrays with ``residue_keep`` and hands ``site_keep`` to
+    ``_apply_site_keep_mask``. The chosen anchor site is always kept, so neither mask is
+    ever all-False.
+    """
+    n_res = len(coords)
+    n_sites = 0 if binding_sites is None else len(binding_sites)
+    if n_res == 0 or n_sites == 0:
+        return np.ones(n_res, dtype=bool), np.ones(n_sites, dtype=bool)
+
+    hosts, counts = _site_host_chains(
+        coords, chains, ligand_coords, ligand_ids, n_sites, host_contact_dist
+    )
+
+    # Anchor on an allosteric site when the per-site labels are present; ASD-without-ortho
+    # proteins omit site_types (every site is allosteric), so fall back to all sites.
+    if site_types is not None and (np.asarray(site_types) == 1).any():
+        candidates = np.flatnonzero(np.asarray(site_types) == 1)
+    else:
+        candidates = np.arange(n_sites)
+
+    primary = int(candidates[int(np.argmax(counts[candidates]))])
+    anchor = hosts[primary]
+
+    residue_keep = chains == anchor
+    site_keep = np.array([h == anchor for h in hosts], dtype=bool)
+    return residue_keep, site_keep
+
 
 class BindingDataset(InMemoryDataset):
     def __init__(
@@ -43,6 +216,8 @@ class BindingDataset(InMemoryDataset):
         sample_radius: bool = False,
         force_reload: bool = False,
         site_type: int = 0,
+        max_center_dist: float | None = DEFAULT_MAX_CENTER_DIST,
+        single_chain: bool = False,
     ):
         self.protein_names = protein_names
         self.graph_info = graph_info
@@ -55,6 +230,8 @@ class BindingDataset(InMemoryDataset):
         self.sampling_strategy = sampling_strategy
         self.sample_radius = sample_radius
         self.site_type = site_type
+        self.max_center_dist = max_center_dist
+        self.single_chain = single_chain
 
         super().__init__(root, force_reload=force_reload)
         self.data, self.slices = torch.load(self.processed_paths[0], weights_only=False)
@@ -74,9 +251,13 @@ class BindingDataset(InMemoryDataset):
         graph_info_ha = sha256(graph_info_ha.encode()).hexdigest()
         protein_ha = sha256(protein_ha.encode()).hexdigest()
         site_type_ha = sha256(str(self.site_type).encode()).hexdigest()
-        full_hash = sha256(
-            (graph_info_ha + protein_ha + site_type_ha).encode()
-        ).hexdigest()[:8]
+        center_dist_ha = sha256(str(self.max_center_dist).encode()).hexdigest()
+        hash_parts = graph_info_ha + protein_ha + site_type_ha + center_dist_ha
+        # Only perturb the hash when single-chain is on, so existing full-assembly caches
+        # stay valid: single_chain=False reproduces the pre-Route-A cache key exactly.
+        if self.single_chain:
+            hash_parts += sha256(b"single_chain").hexdigest()
+        full_hash = sha256(hash_parts.encode()).hexdigest()[:8]
 
         name = f"{full_hash}_{self.label}.pt"
         return [name]
@@ -100,6 +281,46 @@ class BindingDataset(InMemoryDataset):
                     if "site_types" in binding_info.files
                     else None
                 )
+
+                if self.single_chain:
+                    residue_keep, site_keep = select_single_chain(
+                        protein_name=path.stem,
+                        coords=coords,
+                        chains=binding_info["chains"],
+                        binding_sites=binding_sites,
+                        ligand_coords=ligand_coords,
+                        ligand_ids=ligand_ids,
+                        site_types=site_types,
+                    )
+                    coords = coords[residue_keep]
+                    res_names = res_names[residue_keep]
+                    binding_residues = binding_residues[residue_keep]
+                    esm_features = esm_features[residue_keep]
+                    res_depths = res_depths[residue_keep]
+                    (
+                        binding_sites,
+                        ligand_coords,
+                        ligand_ids,
+                        site_types,
+                    ) = _apply_site_keep_mask(
+                        site_keep, binding_sites, ligand_coords, ligand_ids, site_types
+                    )
+
+                if self.max_center_dist is not None:
+                    (
+                        binding_sites,
+                        ligand_coords,
+                        ligand_ids,
+                        site_types,
+                    ) = drop_unreachable_sites(
+                        protein_name=path.stem,
+                        coords=coords,
+                        binding_sites=binding_sites,
+                        ligand_coords=ligand_coords,
+                        ligand_ids=ligand_ids,
+                        site_types=site_types,
+                        max_center_dist=self.max_center_dist,
+                    )
 
                 return create_hetero_graph(
                     protein_name=path.stem,
@@ -245,6 +466,7 @@ class BindingDataModule(pl.LightningDataModule):
         pin_memory: bool = True,
         prefetch_factor: int = 10,
         force_reload: bool = False,
+        max_center_dist: float | None = DEFAULT_MAX_CENTER_DIST,
         follow_batch: list[str] = [
             "ligand",
             "ligand_coords",
@@ -253,6 +475,7 @@ class BindingDataModule(pl.LightningDataModule):
         ],
     ):
         super().__init__()
+        self.max_center_dist = max_center_dist
         self.root = Path(root)
         self.graph_info = graph_info
         self.global_node_subsample_size = global_node_subsample_size
@@ -317,6 +540,7 @@ class BindingDataModule(pl.LightningDataModule):
                 backend=self.backend,
                 force_reload=self.force_reload,
                 site_type=site_type,
+                max_center_dist=self.max_center_dist,
             ),
             batch_size=self.batch_size,
             shuffle=self.shuffle if mode == "train" else False,

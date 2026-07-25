@@ -275,6 +275,7 @@ def evaluate_protein_predictions(
     cluster_preds=True,
     cluster_algorithm=MeanShift(),
     site_type_filter=None,
+    max_center_dist=8.0,
 ):
     """
     Evaluate predictions for a single protein.
@@ -294,6 +295,12 @@ def evaluate_protein_predictions(
             sites/ligands to that class using the per-site `site_types` in binding.npz.
             Proteins without `site_types` are single-class and left unfiltered (the
             caller only filters datasets whose implicit class equals the filter).
+        max_center_dist: Drop ground-truth sites whose center is further than this from
+            any residue in `res_coords`; None scores every annotated site. Mirrors
+            `BindingDataset.max_center_dist` so the benchmark scores the same sites the
+            model was trained on. These are annotation/parsing failures (an ASD
+            riboswitch whose ligand binds RNA while only a protein fragment was parsed),
+            not hard examples -- no virtual node can reach them.
 
     Returns:
         dict: Dictionary containing protein_name, num_ligs, and rank metrics
@@ -304,9 +311,30 @@ def evaluate_protein_predictions(
     bindingsite_centers = binding["binding_site_centers"]
     ligand_coords = binding["ligand_coords"]
     ligand_ids = binding["ligand_ids"]
+    site_types = binding["site_types"] if "site_types" in binding.files else None
 
-    if site_type_filter is not None and "site_types" in binding.files:
-        site_types = binding["site_types"]
+    if max_center_dist is not None and len(bindingsite_centers):
+        reachable = (
+            np.linalg.norm(
+                bindingsite_centers[:, None, :] - binding["res_coords"][None, :, :],
+                axis=-1,
+            ).min(axis=1)
+            <= max_center_dist
+        )
+        if not reachable.all():
+            # Renumber ligand_ids so they stay contiguous indices into the kept sites.
+            remap = np.full(len(reachable), -1, dtype=np.int64)
+            remap[reachable] = np.arange(int(reachable.sum()))
+            atom_keep = reachable[ligand_ids]
+            ligand_coords = ligand_coords[atom_keep]
+            ligand_ids = remap[ligand_ids[atom_keep]]
+            bindingsite_centers = bindingsite_centers[reachable]
+            if site_types is not None:
+                site_types = site_types[reachable]
+            if len(bindingsite_centers) == 0:
+                return None
+
+    if site_type_filter is not None and site_types is not None:
         # site_types is per binding site/ligand: it must align 1:1 with the centers and
         # index cleanly with the per-atom ligand_ids. A mismatch means the extraction
         # wrote inconsistent arrays; fail loudly rather than silently miscount the
@@ -378,6 +406,7 @@ def evaluate_all_proteins(
     cluster_algorithm=MeanShift(),
     show_progress=True,
     site_type_filter=None,
+    max_center_dist=8.0,
 ):
     """
     Evaluate predictions for all proteins in the dataframe.
@@ -411,6 +440,7 @@ def evaluate_all_proteins(
             cluster_preds=cluster_preds,
             cluster_algorithm=cluster_algorithm,
             site_type_filter=site_type_filter,
+            max_center_dist=max_center_dist,
         )
         if result is not None:
             res.append(result)
@@ -425,6 +455,7 @@ def collect_site_classifications(
     threshold=4.0,
     site_type_filter=None,
     default_class=None,
+    max_center_dist=8.0,
 ):
     """Detection-conditioned classifier records for one protein.
 
@@ -457,6 +488,18 @@ def collect_site_classifications(
         site_types = np.full(len(centers), default_class, dtype=int)
     else:
         return []
+
+    # Same unreachable-site filter as evaluate_protein_predictions, so the classifier is
+    # never scored on a site no virtual node could have detected.
+    if max_center_dist is not None and len(centers):
+        reachable = (
+            np.linalg.norm(
+                centers[:, None, :] - binding["res_coords"][None, :, :], axis=-1
+            ).min(axis=1)
+            <= max_center_dist
+        )
+        centers = centers[reachable]
+        site_types = site_types[reachable]
 
     if site_type_filter is not None:
         keep = site_types == site_type_filter

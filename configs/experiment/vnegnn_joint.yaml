@@ -17,29 +17,29 @@ logger:
 
 tags: ["joint", "allosteric"]
 
-# Select on the pooled ranked DCC (the repo default). val/dcc_ranked_allo is the headline
-# result, but it rests on only ~174 allosteric centers in validation, so as a save_top_k=1
-# criterion over 300 validation points it mostly selects noise and selecting checkpoints
-# on the headline metric biases it. The pooled metric is not as orthosteric-dominated as
-# the protein counts suggest (520 sc-PDB proteins average 1.0 center each, while the 159
-# ASD proteins average 3.9), so it covers allosteric localization while staying stable.
-# val/dcc_ranked_allo and val/dcc_ranked_ortho remain logged for reporting.
 callbacks:
   model_checkpoint:
-    monitor: val/dcc_ranked
+    monitor: val/dcc_ranked_ema
+  early_stopping:
+    _target_: lightning.pytorch.callbacks.EarlyStopping
+    monitor: val/dcc_ranked_ema
+    mode: max
+    patience: 12
+    min_delta: 0.0
+    check_finite: true
+    verbose: true
 
 trainer:
-  max_epochs: 1500
+  max_epochs: 400
   num_sanity_val_steps: 0
   log_every_n_steps: 15
   check_val_every_n_epoch: 5
-  # bf16 mixed precision: ~half the activation memory and faster, with
-  # fp32-equivalent dynamic range (no loss scaling / overflow risk). Weights and optimizer
-  # state stay fp32. Sanity-check val/dcc_ranked_* early since the model does E(3)-equivariant
-  # coordinate math
   precision: bf16-mixed
-  # Effective batch = data.batch_size (16) * accumulate_grad_batches (2) = 32, matching the
-  # upstream VN-EGNN batch size that lr=1e-4 was tuned for.
-  accumulate_grad_batches: 2
+  # Effective batch = data.batch_size (8, configs/data/joint.yaml) * accumulate_grad_batches (4) = 32
+  accumulate_grad_batches: 4
 
 scaling_factor: 5.0
+
+# Train-only virtual-node radius augmentation.
+data:
+  sample_radius: true

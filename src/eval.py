@@ -11,7 +11,7 @@ import torch
 from einops._torch_specific import allow_ops_in_compiled_graph
 from lightning import LightningDataModule, LightningModule, Trainer
 from lightning.pytorch.loggers import Logger
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from tqdm.auto import tqdm
 from hydra.core.hydra_config import HydraConfig
 
@@ -86,6 +86,14 @@ def evaluate(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     # (true_class, allosteric_prob) for every ground-truth site the model localized.
     classifier_records: List[Tuple[int, float]] = []
 
+    max_center_dist = cfg.data.get("max_center_dist", 8.0)
+    log.info(f"Scoring sites within {max_center_dist} A of the parsed structure.")
+
+    num_global_nodes = int(
+        OmegaConf.select(cfg, "data.graph_info.number_of_global_nodes", default=8)
+    )
+    log.info(f"Ranking DCC/DCA over K={num_global_nodes} virtual nodes.")
+
     for (
             dataloader_name,
             dataloader_index,
@@ -115,8 +123,9 @@ def evaluate(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         res = evaluate_all_proteins(
             df=predictions_df,
             protein_path=Path(dataset.raw_dir),
-            num_global_nodes=8,
+            num_global_nodes=num_global_nodes,
             site_type_filter=site_type_filter,
+            max_center_dist=max_center_dist,
         )
         df_res = pd.DataFrame(res)
         _, df_rank_dca, dca_ratio_cols = compute_metric_ratios(df_res, "dca")
@@ -143,6 +152,7 @@ def evaluate(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
                     threshold=4.0,
                     site_type_filter=site_type_filter,
                     default_class=default_class,
+                    max_center_dist=max_center_dist,
                 )
             )
 

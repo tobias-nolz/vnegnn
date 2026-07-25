@@ -4,6 +4,9 @@ compile: true
 scaling_factor: 5.0
 threshold: 4
 monitor: val/dcc_ranked
+# Smoothing for `val/dcc_ranked_ema`, the metric used for checkpoint selection and early
+# stopping (see BindingSitesWrapper.on_validation_epoch_end).
+selection_metric_ema_decay: 0.3
 interval: epoch
 frequency: ${trainer.check_val_every_n_epoch}
 cluster: null
@@ -14,34 +17,33 @@ loss:
     _target_: src.modules.losses.HuberLoss
   confidence_loss:
     _target_: src.modules.losses.ConfidenceLoss
+  # Listwise ranking head on the confidence output. This term optimises the per-protein ordering directly.
+  # It only moves confidence, not coordinates, so it lifts DCC0 toward the DCC7 ceiling.
+  #   tau_dist: sharpness of the distance target (A); smaller -> harder one-hot on the
+  #             closest node. 2.0 keeps a few near-optimal nodes as soft positives.
+  #   tau_conf: softmax temperature on the predicted confidences. Set weight to 0 to
+  #             disable and recover the previous behaviour exactly.
+  ranking_loss:
+    _target_: src.modules.losses.ConfidenceRankingLoss
+    tau_dist: 2.0
+    tau_conf: 0.5
   segmentation_loss:
     _target_: src.modules.losses.DiceLoss
-  # Binary orthosteric(0)/allosteric(1) head. Each virtual node is labelled with the site
-  # type of its nearest center, and under the joint datamodule's balanced sampling that
-  # target lands at roughly 76/24 ortho/allo (half the proteins are sc-PDB and thus
-  # all-orthosteric; the ASD half averages ~47.5% allosteric centers). pos_weight
-  # (1-p)/p ~= 3.2 restores a balanced effective prior so the 0.5 decision threshold is
-  # meaningful. Set to null to train on the natural prior instead - AUROC is invariant
-  # to this, but accuracy/F1 at a fixed threshold are not.
+  # Binary orthosteric(0)/allosteric(1) head. pos_weight (1-p)/p ~= 3.2 restores a balanced
+  # effective prior so the 0.5 decision threshold is meaningful.
   classification_loss:
     _target_: torch.nn.BCEWithLogitsLoss
     pos_weight:
       _target_: torch.tensor
-      data: [3.2]
-  confidence_loss_weight: 1.0
+      data: [ 3.2 ]
+  confidence_loss_weight: 0.1
+  ranking_loss_weight: 1.0
   segmentation_loss_weight: 1.0
-  # 0.5 compensates for pos_weight inflating the *magnitude* of class_loss (~2.05x:
-  # train 0.30 -> 0.62 over a matched 50-epoch A/B). classifier_mlp and confidence_mlp
-  # both read x_global_node, so an uncompensated pos_weight doubles classification's
-  # share of the multi-task sum and crowds out the confidence module: rank-0 DCC/DCA
-  # fell 14.8% on average across all four test sets while rank-7 (which does not use
-  # the ranking) rose, and val/confidence_var collapsed by 42%. pos_weight's class
-  # rebalancing is kept -- that is what lifted classifier AUROC 0.626 -> 0.685.
   classification_loss_weight: 0.5
   # Each virtual node is labelled with the site type of its nearest annotated center.
-  # Set to e.g. 8.0 to only train/evaluate the classifier on virtual nodes within that
-  # many Angstrom of a real site (foreground); null supervises every virtual node.
-  classification_foreground_dist: null
+  # Only virtual nodes within this many Angstrom of a real site (foreground) contribute;
+  # null supervises every virtual node.
+  classification_foreground_dist: 8.0
 
 backbone:
   _target_: src.models.vnegnn.VNEGNN

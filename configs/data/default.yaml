@@ -4,7 +4,7 @@ root: ${paths.data_dir}/vnegnn
 graph_info:
   _target_: src.datasets.binding_dataset.GraphInfo
   max_neighbours: 10
-  number_of_global_nodes: 8
+  number_of_global_nodes: 16
   neigh_dist_cutoff: 10
 
 random_rotations: true
@@ -18,4 +18,7 @@ num_workers: 4
 persistent_workers: true
 pin_memory: true
 prefetch_factor: 2
+# Virtual-node radius augmentation.
+# - false = seed all K nodes on the OUTER SHELL of the bounding sphere
+# - true = get() resamples the shell radius ~U(0, R) each step so nodes  populate the interior over training
 sample_radius: false
