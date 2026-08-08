@@ -175,8 +175,13 @@ classifier metric (`classifier/auroc_detected`) pools class-0 detections from th
 orthosteric benchmarks with class-1 detections from the allosteric set, so it needs both:
 
 ```bash
-python src/eval.py wandb_run_id=[RUN_ID] +data=joint
+python src/eval.py wandb_run_id=[RUN_ID] +data=joint data.single_chain_allosteric=true
 ```
+
+Training and evaluation **must agree on the ASD preprocessing**: a single-chain-trained
+model scored on full assemblies is out of distribution and understates itself. Drop
+`data.single_chain_allosteric=true` only for a model trained without it. K=8 checkpoints
+additionally need `data.graph_info.number_of_global_nodes=8`, since the default is now 16.
 
 **Allosteric-only comparison to the zero-shot baseline.** Evaluates just the ASD test
 split; the prediction CSV additionally carries an `allosteric_prob_0` column per predicted
@@ -200,3 +205,33 @@ python scripts/allosteric-sites/compare_p2rank.py \
   --num-ranks 8 \
   --threads 8
 ```
+
+The command above scores the **full-assembly, unfiltered** structures. To compare against
+the model on the *same* denominator (single-chain input, 8 A site filter, allosteric-only
+ground truth), add `--matched` and point it at the model's prediction file, which defines
+the exact protein set:
+
+```bash
+python scripts/allosteric-sites/compare_p2rank.py \
+  --asd-dir data/allosteric-sites/allosteric \
+  --split-file data/allosteric-sites/allosteric/splits/test_ids_allosteric_mmseqs30 \
+  --matched \
+  --proteins-csv logs/eval/runs/[EVAL_DIR]/predictions_allosteric.csv \
+  --prank-bin /path/to/p2rank/prank
+```
+
+### 7. Class-aware deployment re-ranking
+
+The deployment result is a re-ranking of a finished evaluation's predictions, not a
+separate model: it orders each protein's clustered predictions by
+`z(confidence) + z(allosteric_prob)` instead of confidence alone. No retraining, no model
+inference. `K` is read from the prediction file.
+
+```bash
+python scripts/allosteric-sites/rerank_probe.py \
+  logs/eval/runs/[EVAL_DIR]/predictions_allosteric.csv --label deploy
+```
+
+The `confidence_0` row must reproduce the logged evaluation exactly; that is the harness
+check before any other row is trusted. Read `conf_z_plus_allo_z` for the deployment
+number, or pass `--strategy conf_z_plus_allo_z` to print only those two rows.
