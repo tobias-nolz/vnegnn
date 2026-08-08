@@ -266,6 +266,76 @@ def predictions_to_df(predictions):
     return pd.DataFrame(rows)
 
 
+def _zscore(x):
+    x = np.asarray(x, dtype=float)
+    s = x.std()
+    return (x - x.mean()) / s if s > 1e-9 else np.zeros_like(x)
+
+
+def _ranking_score(rank_by, coords, confs, res_coords, allo=None, radius=8.0):
+    """Score used to order a protein's (clustered) predictions.
+
+    ``rank_by="confidence_0"`` (default) returns the model confidence unchanged, so
+    the benchmark reproduces exactly. Any other key is an alternative re-ranking of the
+    *same* predicted clusters (coords/sites/denominator held fixed) -- the no-training
+    probe of the DCC/DCA ranking gap. Two families:
+
+    * geometry-grounded pocketness priors from the residue cloud ``res_coords`` (buried
+      nodes among many residues vs solvent-floaters);
+    * classifier-driven -- ``allo`` is the per-node allosteric probability
+      (``allosteric_prob_0``), which promotes nodes the model calls *allosteric* over
+      the (usually higher-confidence) orthosteric pocket, the natural fix on the
+      allosteric-only benchmark.
+    """
+    if rank_by in (None, "confidence_0", "confidence"):
+        return np.asarray(confs, dtype=float)
+
+    confs = np.asarray(confs, dtype=float)
+    scores = {}
+
+    if res_coords is not None and len(res_coords):
+        d = np.linalg.norm(coords[:, None, :] - res_coords[None, :, :], axis=-1)
+        min_d = d.min(axis=1)
+        density = (d <= radius).sum(axis=1).astype(float)
+        density_close = (d <= radius / 2.0).sum(axis=1).astype(float)
+        scores.update(
+            {
+                "density": density,
+                "density_close": density_close,
+                "neg_min_res_dist": -min_d,
+                "conf_z_plus_density_z": _zscore(confs) + _zscore(density),
+                "conf_z_plus_negmind_z": _zscore(confs) + _zscore(-min_d),
+                "conf_z_plus_densityclose_z": _zscore(confs) + _zscore(density_close),
+            }
+        )
+
+    if allo is not None:
+        allo = np.asarray(allo, dtype=float)
+        scores.update(
+            {
+                "allo_prob": allo,
+                "conf_z_plus_allo_z": _zscore(confs) + _zscore(allo),
+                "conf_x_allo": confs * allo,
+                "allo_z_plus_density_z": (
+                    _zscore(allo) + _zscore(scores["density"])
+                    if "density" in scores
+                    else _zscore(allo)
+                ),
+            }
+        )
+
+    if rank_by not in scores:
+        # No structure/classifier column to key on -> fall back to confidence so the
+        # protein still scores rather than crashing the whole benchmark.
+        if not scores:
+            return confs
+        raise ValueError(
+            f"unknown rank_by={rank_by!r}; expected 'confidence_0' or one of "
+            f"{sorted(scores)}"
+        )
+    return scores[rank_by]
+
+
 def evaluate_protein_predictions(
     protein_name,
     df,
@@ -276,6 +346,8 @@ def evaluate_protein_predictions(
     cluster_algorithm=MeanShift(),
     site_type_filter=None,
     max_center_dist=8.0,
+    rank_by="confidence_0",
+    rank_radius=8.0,
 ):
     """
     Evaluate predictions for a single protein.
@@ -360,6 +432,11 @@ def evaluate_protein_predictions(
     df_selected_protein = df.loc[lambda x: x["protein_name"] == protein_name]
     pred_coords = df_selected_protein[["x", "y", "z"]].values
     confs = df_selected_protein["confidence_0"].values
+    allo = (
+        df_selected_protein["allosteric_prob_0"].values
+        if "allosteric_prob_0" in df_selected_protein.columns
+        else None
+    )
 
     lig_ids = np.unique(ligand_ids)
     num_ligs = len(lig_ids)
@@ -370,9 +447,20 @@ def evaluate_protein_predictions(
             raise ValueError(
                 "cluster_algorithm must be provided when cluster_preds=True"
             )
-        pred_coords, confs = cluster(pred_coords, confs, algorithm=cluster_algorithm)
+        # Aggregate coords and every per-node scalar under the SAME cluster labels, so a
+        # re-ranking by allosteric_prob uses clusters identical to the confidence path.
+        labels = cluster_algorithm.fit_predict(pred_coords)
+        uniq = np.unique(labels)
+        pred_coords = np.stack([pred_coords[labels == u].mean(axis=0) for u in uniq])
+        confs = np.array([confs[labels == u].mean() for u in uniq])
+        if allo is not None:
+            allo = np.array([allo[labels == u].mean() for u in uniq])
 
-    confs_rank = np.argsort(confs)[::-1]
+    res_coords = binding["res_coords"] if "res_coords" in binding.files else None
+    score = _ranking_score(
+        rank_by, pred_coords, confs, res_coords, allo=allo, radius=rank_radius
+    )
+    confs_rank = np.argsort(score)[::-1]
 
     for lig_id in lig_ids:
         lig_coords = ligand_coords[ligand_ids == lig_id]
@@ -407,6 +495,8 @@ def evaluate_all_proteins(
     show_progress=True,
     site_type_filter=None,
     max_center_dist=8.0,
+    rank_by="confidence_0",
+    rank_radius=8.0,
 ):
     """
     Evaluate predictions for all proteins in the dataframe.
@@ -441,6 +531,8 @@ def evaluate_all_proteins(
             cluster_algorithm=cluster_algorithm,
             site_type_filter=site_type_filter,
             max_center_dist=max_center_dist,
+            rank_by=rank_by,
+            rank_radius=rank_radius,
         )
         if result is not None:
             res.append(result)

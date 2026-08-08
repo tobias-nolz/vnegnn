@@ -46,6 +46,16 @@ max_center_dist: 8.0
 #     NOT comparable to pre-filter ASD numbers
 single_chain_allosteric: false
 
+# per_site_labels: label each virtual node with the site type of its NEAREST center
+#   (true, deployed). Set false for PER-PROTEIN labels: every center inherits the
+#   protein's dataset class, so an ASD protein's extracted orthosteric pocket is
+#   relabelled allosteric. Isolates the value of the per-site labelling scheme.
+per_site_labels: true
+# drop_ortho_augmentation: when true, drop the class-0 orthosteric centers harvested
+#   from ASD proteins (--extract-orthosteric), reproducing the no-augmentation dataset
+#   exactly (extraction adds labels, not nodes). Isolates the value of the augmentation.
+drop_ortho_augmentation: false
+
 batch_size: 8
 
 n_jobs: 8

@@ -46,6 +46,8 @@ class JointBindingDataModule(BindingDataModule):
         sampling: Literal["dataset", "cluster"] = "cluster",
         cluster_tsv: str | None = None,
         single_chain_allosteric: bool = False,
+        per_site_labels: bool = True,
+        drop_ortho_augmentation: bool = False,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
@@ -53,6 +55,8 @@ class JointBindingDataModule(BindingDataModule):
         self.split_suffix = split_suffix
         self.allosteric_dataset_name = allosteric_dataset_name
         self.single_chain_allosteric = single_chain_allosteric
+        self.per_site_labels = per_site_labels
+        self.drop_ortho_augmentation = drop_ortho_augmentation
         self.sampling = sampling
         self.cluster_tsv = (
             Path(cluster_tsv)
@@ -122,6 +126,8 @@ class JointBindingDataModule(BindingDataModule):
             site_type=site_type,
             max_center_dist=self.max_center_dist,
             single_chain=single_chain,
+            per_site_labels=self.per_site_labels,
+            drop_ortho_augmentation=self.drop_ortho_augmentation,
         )
 
     def _wrap_loader(self, dataset, shuffle: bool, sampler=None) -> DataLoader:

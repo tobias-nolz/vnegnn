@@ -218,6 +218,8 @@ class BindingDataset(InMemoryDataset):
         site_type: int = 0,
         max_center_dist: float | None = DEFAULT_MAX_CENTER_DIST,
         single_chain: bool = False,
+        per_site_labels: bool = True,
+        drop_ortho_augmentation: bool = False,
     ):
         self.protein_names = protein_names
         self.graph_info = graph_info
@@ -232,6 +234,14 @@ class BindingDataset(InMemoryDataset):
         self.site_type = site_type
         self.max_center_dist = max_center_dist
         self.single_chain = single_chain
+        # Label-scheme ablations (Section 5.5, tab:classification-results). Both default to
+        # the deployed behaviour, so the cache key and graphs are unchanged when unset.
+        #   per_site_labels=False       -> per-protein labels: every center inherits the
+        #                                  dataset-level `site_type` instead of its own class.
+        #   drop_ortho_augmentation=True -> no --extract-orthosteric augmentation: drop the
+        #                                  class-0 centers harvested from ASD proteins.
+        self.per_site_labels = per_site_labels
+        self.drop_ortho_augmentation = drop_ortho_augmentation
 
         super().__init__(root, force_reload=force_reload)
         self.data, self.slices = torch.load(self.processed_paths[0], weights_only=False)
@@ -257,6 +267,13 @@ class BindingDataset(InMemoryDataset):
         # stay valid: single_chain=False reproduces the pre-Route-A cache key exactly.
         if self.single_chain:
             hash_parts += sha256(b"single_chain").hexdigest()
+        # The label-scheme ablations change the cached `bindingsite_site_type` (and, for the
+        # augmentation drop, the center set), so they must fork the cache. Defaults leave the
+        # key untouched.
+        if not self.per_site_labels:
+            hash_parts += sha256(b"per_protein_labels").hexdigest()
+        if self.drop_ortho_augmentation:
+            hash_parts += sha256(b"drop_ortho_aug").hexdigest()
         full_hash = sha256(hash_parts.encode()).hexdigest()[:8]
 
         name = f"{full_hash}_{self.label}.pt"
@@ -281,6 +298,26 @@ class BindingDataset(InMemoryDataset):
                     if "site_types" in binding_info.files
                     else None
                 )
+
+                if (
+                    self.drop_ortho_augmentation
+                    and self.site_type == 1  # 1 == allosteric (see joint_dataset.ALLOSTERIC)
+                    and site_types is not None
+                ):
+                    keep_allo = np.asarray(site_types) != 0  # 0 == orthosteric
+                    if keep_allo.any() and not keep_allo.all():
+                        (
+                            binding_sites,
+                            ligand_coords,
+                            ligand_ids,
+                            site_types,
+                        ) = _apply_site_keep_mask(
+                            keep_allo,
+                            binding_sites,
+                            ligand_coords,
+                            ligand_ids,
+                            site_types,
+                        )
 
                 if self.single_chain:
                     residue_keep, site_keep = select_single_chain(
@@ -322,6 +359,8 @@ class BindingDataset(InMemoryDataset):
                         max_center_dist=self.max_center_dist,
                     )
 
+                graph_site_types = site_types if self.per_site_labels else None
+
                 return create_hetero_graph(
                     protein_name=path.stem,
                     coords=coords,
@@ -334,7 +373,7 @@ class BindingDataset(InMemoryDataset):
                     esm_features=esm_features,
                     graph_info=self.graph_info,
                     site_type=self.site_type,
-                    site_types=site_types,
+                    site_types=graph_site_types,
                 )
             except Exception as e:
                 log.warning(f"Error in {path}: {e}")

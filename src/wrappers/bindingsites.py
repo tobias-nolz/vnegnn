@@ -8,7 +8,13 @@ from torch import Tensor, nn
 from torch_geometric.nn.pool import knn
 from torchmetrics import AUROC, Accuracy, JaccardIndex
 
-from src.modules.losses import ConfidenceLoss, ConfidenceRankingLoss, DiceLoss
+from src.modules.losses import (
+    ClassAwareConfidenceRankingLoss,
+    ConfidenceLoss,
+    DiceLoss,
+    allosteric_ranking_geometry,
+    class_aware_ranking_score,
+)
 from src.modules.metrics import DCA, DCC
 from src.utils.misc import calc_group_var, multi_predictions
 from src.wrappers.base import WrapperBase
@@ -100,9 +106,29 @@ class BindingSitesLoss(nn.Module):
         )
 
         if self.ranking_loss is not None and self.ranking_loss_weight > 0:
-            ranking_loss = self.ranking_loss(
-                preds_confidence.squeeze(), dists_confidence, x_batch
-            )
+            if isinstance(self.ranking_loss, ClassAwareConfidenceRankingLoss):
+                # Class-aware ranking: rank z(conf) + w*gamma*z(allo_logit) toward the
+                # nearest *task-class* site, so the allosteric pocket is promoted over
+                # the (usually higher-confidence) orthosteric one on ASD proteins.
+                gamma, rel_dists = allosteric_ranking_geometry(
+                    node_pos=x,
+                    node_batch=x_batch,
+                    centers=y,
+                    center_batch=y_batch,
+                    center_types=batch["atom"].bindingsite_site_type,
+                    dists_any=dists_confidence,
+                )
+                ranking_loss = self.ranking_loss(
+                    preds_confidence.squeeze(),
+                    preds_class.squeeze(),
+                    gamma,
+                    rel_dists,
+                    x_batch,
+                )
+            else:
+                ranking_loss = self.ranking_loss(
+                    preds_confidence.squeeze(), dists_confidence, x_batch
+                )
         else:
             ranking_loss = confidence_loss.new_zeros(())
 
@@ -242,6 +268,41 @@ class BindingSitesWrapper(WrapperBase):
         pos_global_node = pos_global_node * self.hparams.scaling_factor
         return x_atom, pos_global_node, x_global_node, confidence_out, class_out
 
+    def _rank_confidence(
+        self, preds_confidence: Tensor, preds_class: Tensor, batch: Dict[str, Tensor]
+    ) -> Tensor:
+        """Scalar the ranked val metrics order nodes by.
+
+        With the class-aware ranking loss active, this is the *same* combined score
+        ``z(conf) + w*gamma*z(allo_logit)`` used in training and deployment, so
+        checkpoint selection (``val/dcc_ranked_ema``) tracks the deployed ranking rather
+        than confidence alone. Otherwise it is raw confidence (baseline behaviour).
+        """
+        rl = getattr(self.loss, "ranking_loss", None)
+        if not isinstance(rl, ClassAwareConfidenceRankingLoss) or rl.class_weight == 0:
+            return preds_confidence
+        node_batch = batch["global_node"].batch
+        center_types = batch["atom"].bindingsite_site_type
+        center_batch = batch["atom"]["bindingsite_center_batch"]
+        num_p = int(node_batch.max().item()) + 1
+        has_allo = torch.zeros(num_p, dtype=torch.bool, device=node_batch.device)
+        allo_center = center_types == 1
+        if allo_center.any():
+            has_allo[center_batch[allo_center]] = True
+        gamma = torch.where(
+            has_allo[node_batch],
+            torch.ones((), device=node_batch.device),
+            -torch.ones((), device=node_batch.device),
+        )
+        score = class_aware_ranking_score(
+            preds_confidence.squeeze(),
+            preds_class.squeeze(),
+            gamma,
+            node_batch,
+            rl.class_weight,
+        )
+        return score.reshape(preds_confidence.shape)
+
     def model_step(self, batch: Dict[str, Tensor]) -> tuple[Dict[str, Tensor], Tensor]:
         loss_dict, preds = self.loss(model=self, batch=batch)
         return loss_dict, preds
@@ -326,12 +387,16 @@ class BindingSitesWrapper(WrapperBase):
             batch_ligands=batch["ligand"].ligand_coords_batch,
         )
 
+        ranking_confidence = self._rank_confidence(
+            preds_confidence, preds_class, batch
+        )
+
         self.val_dcc_ranked(
             coords_global_nodes=preds_pos_global_node,
             coords_bindingsites=binding_site_center,
             batch_global_nodes=batch_global_nodes,
             batch_bindingsites=batch["atom"]["bindingsite_center_batch"],
-            global_node_confidence=preds_confidence,
+            global_node_confidence=ranking_confidence,
         )
 
         self.val_dca_ranked(
@@ -340,7 +405,7 @@ class BindingSitesWrapper(WrapperBase):
             ligand_ids=batch["ligand"].ligand_ids,
             batch_global_nodes=batch_global_nodes,
             batch_ligands=batch["ligand"].ligand_coords_batch,
-            global_node_confidence=preds_confidence,
+            global_node_confidence=ranking_confidence,
         )
         rand_confs = torch.rand_like(preds_confidence)
         self.val_dcc_rand_ranked(
@@ -416,7 +481,7 @@ class BindingSitesWrapper(WrapperBase):
                     coords_bindingsites=binding_site_center,
                     batch_global_nodes=batch_global_nodes,
                     batch_bindingsites=center_batch,
-                    global_node_confidence=preds_confidence,
+                    global_node_confidence=ranking_confidence,
                     site_mask=cls_mask,
                 )
                 self.log(
