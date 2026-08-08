@@ -10,6 +10,10 @@ because it has internalized a geometric prior toward deep orthosteric pockets. T
 joint training and (b) an explicit
 allosteric-classification head.
 
+**Measured outcomes live in [`results/asd_results.md`](results/asd_results.md)** — every run, the
+P2Rank baseline, both ablations and the evaluation denominators, taken from the W&B run summaries.
+This document covers the design; that one covers what it produced.
+
 ## Summary of changes
 
 ### Model — a second virtual-node head
