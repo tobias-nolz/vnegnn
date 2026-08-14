@@ -74,7 +74,8 @@ This document covers the design; that one covers what it produced.
 
 ### Splits — sequence-identity based, leakage-free
 
-`scripts/allosteric-sites/make_splits.py`
+`scripts/allosteric-sites/make_splits.py` — **published ID lists and provenance in
+[`splits.md`](splits.md)**; the split actually used by every run is the `mmseqs30` suffix.
 
 - mmseqs2 clustering at 30% identity; whole clusters go to one split.
 - ASD proteins sharing a cluster with any sc-PDB train/valid protein are forced into

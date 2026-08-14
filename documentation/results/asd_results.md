@@ -2,7 +2,10 @@
 
 Canonical record of every allosteric evaluation behind Section 5 of the thesis. All values are
 copied from the W&B run summaries under `logs/eval/runs/<dir>/wandb/*/files/wandb-summary.json`,
-rounded to three decimals; nothing here is re-derived by hand.
+rounded to three decimals.
+
+The test set these numbers are computed on is documented, with the published PDB ID lists, in
+[`../splits.md`](../splits.md).
 
 ## How to read the numbers
 
