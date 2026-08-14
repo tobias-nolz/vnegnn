@@ -5,7 +5,8 @@ copied from the W&B run summaries under `logs/eval/runs/<dir>/wandb/*/files/wand
 rounded to three decimals.
 
 The test set these numbers are computed on is documented, with the published PDB ID lists, in
-[`../splits.md`](../splits.md).
+[`../splits.md`](../splits.md). The `sphere` and `K32` checkpoints behind the two headline rows are
+published and documented in [`../checkpoints.md`](../checkpoints.md).
 
 ## How to read the numbers
 
