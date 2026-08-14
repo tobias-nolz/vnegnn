@@ -234,8 +234,7 @@ saved automatically.
 python src/train.py experiment=vnegnn
 ```
 
-I provide the [best_model_weights.ckpt](best_model_weights.ckpt) which I obtained in epoch `1299` during training with
-the `vnegnn` experiment config.
+For the obtained model weights, refer to [checkpoints.md](documentation/checkpoints.md).
 
 ## Model Evaluation
 

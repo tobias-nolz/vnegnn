@@ -172,3 +172,7 @@ AGENTS.md
 exports/*
 
 .cursor
+
+# Model weights are published as GitHub Release assets, not committed.
+# SHA256SUMS stays tracked so a download can be verified.
+checkpoints/*.ckpt

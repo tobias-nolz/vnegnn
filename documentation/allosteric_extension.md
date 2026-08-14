@@ -98,7 +98,7 @@ This document covers the design; that one covers what it produced.
   reliable allosteric localization is the goal. Switch it to `val/dcc_ranked` (pooled) or
   `val/dcc_ranked_ortho` to weight orthosteric retention.
 - `strict_loading = False` on `BindingSitesWrapper` so checkpoints trained before the
-  classifier head (e.g. `best_model_weights.ckpt`) still load and evaluate.
+  classifier head (e.g. `best_zero_shot.ckpt.ckpt`) still load and evaluate.
 - **Eval robustness**: `evaluate_protein_predictions` asserts that a protein's per-site
   `site_types` aligns with its centers/ligand ids before filtering, so a malformed
   extraction fails loudly instead of silently miscounting the allosteric benchmark.
